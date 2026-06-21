@@ -67,8 +67,58 @@ RVI_LO = 0.640
 RVI_HI = 0.942
 ADX_TREND_MIN = 25.0
 
+# ── Execution quality gate (Grade A signals only) ─────────────────────────────
+# These thresholds further filter Grade A signals before live routing.
+# B / C / D remain display-only regardless.
+EXEC_RANK_MIN: float    = 75.0          # minimum rank_score for execution
+EXEC_BLOCKED_SYMS: set  = {"AAPL"}     # symbols blocked from live execution (temporary)
+
 CHART_DIR = _BC_CHART_DIR
 SYMBOLS   = list(_BC_SYMBOLS)
+
+SESSION_CUTOFF = 525  # session_min >= 525 => at or after 14:15 ET; block execution
+
+
+# -- Execution quality gate ---------------------------------------------------
+
+def passes_exec_gate(sig: Dict) -> tuple:
+    """
+    Returns (True, "") when a Grade A signal clears all live-execution quality gates.
+    Returns (False, reason_str) for any failure.
+
+    Gates (all must pass):
+      1. rank_score >= EXEC_RANK_MIN (75)
+      2. rvi_bucket == "High"
+      3. regime == "Trend"
+      4. atr_pct <= ATR_THRESHOLD (0.52)
+      5. symbol not in EXEC_BLOCKED_SYMS  (currently {"AAPL"})
+      6. session_min < SESSION_CUTOFF (no trades at or after 14:15 ET)
+    """
+    rank = sig.get("rank_score", 0.0)
+    if rank < EXEC_RANK_MIN:
+        return False, f"rank_score={rank:.1f} < {EXEC_RANK_MIN}"
+
+    bkt = sig.get("rvi_bucket", "")
+    if bkt != "High":
+        return False, f"rvi_bucket={bkt!r} (need High)"
+
+    regime = sig.get("regime", "")
+    if regime != "Trend":
+        return False, f"regime={regime!r} (need Trend)"
+
+    atr_pct = sig.get("atr_pct", 999.0)
+    if atr_pct > ATR_THRESHOLD:
+        return False, f"atr_pct={atr_pct:.3f} > {ATR_THRESHOLD}"
+
+    sym = sig.get("symbol", "")
+    if sym in EXEC_BLOCKED_SYMS:
+        return False, f"{sym} temporarily blocked"
+
+    sm = sig.get("session_min", SESSION_CUTOFF)
+    if sm >= SESSION_CUTOFF:
+        return False, f"session_min={sm} >= {SESSION_CUTOFF} (after 14:15 ET)"
+
+    return True, ""
 
 
 # -- RVI helpers --------------------------------------------------------------
@@ -273,10 +323,24 @@ class BCPaperBridge:
     # -- Signal logging -------------------------------------------------------
 
     def _log_signal(self, sig: Dict) -> None:
-        grade   = sig.get("grade", "?")
-        regime  = sig.get("regime", "?")
-        is_live = self._enable_live and grade == "A" and regime != "Range"
-        tag     = "-> LIVE EXECUTION" if is_live else "PAPER ONLY"
+        grade  = sig.get("grade", "?")
+        regime = sig.get("regime", "?")
+
+        # Gate: Grade A must also clear the execution quality gate
+        if self._enable_live and grade == "A":
+            _gate_ok, _gate_reason = passes_exec_gate(sig)
+            is_live = _gate_ok
+        else:
+            is_live      = False
+            _gate_ok     = False
+            _gate_reason = ""
+
+        if is_live:
+            tag = "-> LIVE EXECUTION"
+        elif self._enable_live and grade == "A" and not _gate_ok:
+            tag = f"DISPLAY ONLY [gate: {_gate_reason}]"
+        else:
+            tag = "PAPER ONLY"
 
         self._log(
             f"[PAPER / BC EXPERIMENTAL]  "
@@ -325,10 +389,11 @@ class BCPaperBridge:
           1. ENABLE_LIVE_BC=True        (checked by caller; re-checked here)
           2. Grade A                    (checked by caller; re-checked here)
           3. Trend regime               (checked by caller; re-checked here)
-          4. Symbol not in _active_signals
-          5. Symbol has no open position
-          6. Max open positions not reached
-          7. _on_analyzer_trade_signal exists on app
+          4. passes_exec_gate()         (rank_score/RVI/ATR/symbol/time)
+          5. Symbol not in _active_signals
+          6. Symbol has no open position
+          7. Max open positions not reached
+          8. _on_analyzer_trade_signal exists on app
         """
         symbol         = sig["symbol"]
         direction_exec = "CALL" if sig["direction"] == "LONG" else "PUT"
@@ -344,6 +409,19 @@ class BCPaperBridge:
             return
         if regime == "Range":
             self._log(f"[BC] {symbol}: Range regime -- blocked from execution")
+            return
+
+        # Quality gate re-check (also checked in _log_signal -- defense in depth)
+        _gate_ok, _gate_reason = passes_exec_gate(sig)
+        if not _gate_ok:
+            self._log(f"[BC] {symbol}: quality gate blocked -- {_gate_reason}")
+            return
+
+        # Wall-clock time guard: catch cases where scan runs after 14:15 ET
+        _now    = datetime.utcnow()
+        _now_sm = (_now.hour - 9) * 60 + _now.minute - 30
+        if _now_sm >= SESSION_CUTOFF:
+            self._log(f"[BC] {symbol}: after 14:15 ET (wall_sm={_now_sm}) -- no execution")
             return
 
         # Active signal guard
@@ -490,12 +568,18 @@ class MarketAnalyzerEngine:
 
     def start(self) -> None:
         self.log_msg.emit("[BC Bridge] ============================================")
-        mode = "LIVE-GATED (Grade A -> execution)" if self._enable_live_bc else "PAPER ONLY"
+        mode = "LIVE-GATED (Grade A + exec quality gate)" if self._enable_live_bc else "PAPER ONLY"
         self.log_msg.emit(f"[BC Bridge]  MODE: {mode}")
         self.log_msg.emit(f"[BC Bridge]  Engine: B+C + ATR<={ATR_THRESHOLD} + Top-{TOP_N_DAILY}/day")
         self.log_msg.emit(f"[BC Bridge]  Symbols: {len(SYMBOLS)}  |  Scan: {SCAN_INTERVAL_SEC}s")
         self.log_msg.emit("[BC Bridge]  Grade A=Trend+HighRVI  B/C/D=display only")
-        if not self._enable_live_bc:
+        if self._enable_live_bc:
+            blocked = ", ".join(sorted(EXEC_BLOCKED_SYMS)) or "none"
+            self.log_msg.emit(
+                f"[BC Bridge]  Exec gate: score>={EXEC_RANK_MIN}  RVI=High  Trend  "
+                f"ATR<={ATR_THRESHOLD}  blocked={blocked}  before 14:15 ET"
+            )
+        else:
             self.log_msg.emit("[BC Bridge]  Set ENABLE_LIVE_BC=True to enable Grade A execution")
         self.log_msg.emit("[BC Bridge] ============================================")
         if self._bridge:
