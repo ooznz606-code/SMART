@@ -5447,7 +5447,11 @@ class TradingApp(QMainWindow):
         self.account_balance = 0.0
         self._client_id      = int(datetime.now().strftime("%H%M%S")) % 9000 + 1000
         self.strategy        = SmartStrategyPro()
-        self.auto_bot_scan_symbols = list(X1_SCAN_SYMBOLS)
+        if ANALYZER_MODE == "BC":
+            from smart_analyzer_bridge_bc import SYMBOLS as _bc_init_syms
+            self.auto_bot_scan_symbols = list(_bc_init_syms)
+        else:
+            self.auto_bot_scan_symbols = list(X1_SCAN_SYMBOLS)
 
         self.risk_manager    = RiskManager(max_open_trades=3)
         # ✅ تأكيد القيم الافتراضية الآمنة
@@ -8244,18 +8248,21 @@ class TradingApp(QMainWindow):
             else None  # X2 mode: no separate bridge -- all in _analyzer
         )
 
-        # ── تشغيل محلل الأخبار ───────────────────────────────────────────
-        try:
-            from news_analyzer import get_news_analyzer
-            _na = get_news_analyzer()
-            _na.add_callback(lambda s: self._on_bot_scan_signal(s if isinstance(s, str) else s.to_signal()))
-            _na.start()
-            self._on_bot_scan_signal("📰 محلل الأخبار بدأ — يراقب قائمة X1 (14 رمز)")
-        except Exception as _ne:
-            self._on_bot_scan_signal(f"⚠️ محلل الأخبار: {_ne}")
+        # ── تشغيل محلل الأخبار — خارج UI thread لتجنب التجميد ──────────
+        def _init_news_analyzer(app=self):
+            try:
+                from news_analyzer import get_news_analyzer
+                _na = get_news_analyzer()
+                _na.add_callback(lambda s: app._safe_log(s if isinstance(s, str) else s.to_signal()))
+                _na.start()
+                app._safe_log("📰 محلل الأخبار بدأ — يراقب قائمة X1 (14 رمز)")
+            except Exception as _ne:
+                app._safe_log(f"⚠️ محلل الأخبار: {_ne}")
+        import threading as _thr_na
+        _thr_na.Thread(target=_init_news_analyzer, daemon=True, name="NewsAnalyzerInit").start()
 
-        # ── تشغيل tv_datafeed تلقائياً لتحديث بيانات الشارت ────────
-        self._start_tv_datafeed()
+        # ── تشغيل tv_datafeed — مؤجّل لإتاحة رسم الـ UI أولاً ─────────
+        QTimer.singleShot(0, self._start_tv_datafeed)
 
         self.monitor_thread = MonitorThread(
             self.ib, self.position_manager,
@@ -10133,7 +10140,7 @@ class TradingApp(QMainWindow):
                 _last_daily  = 0.0
                 _cycle       = 0
 
-                self._on_bot_scan_signal("✅ tv_datafeed بدأ داخل البرنامج")
+                self._safe_log("✅ tv_datafeed بدأ داخل البرنامج")
 
                 while not self._tv_stop_event.is_set():
                     _cycle += 1
@@ -10174,9 +10181,9 @@ class TradingApp(QMainWindow):
                     self._tv_stop_event.wait(timeout=_interval)
 
             except ImportError:
-                self._on_bot_scan_signal("❌ tv_datafeed: تعذّر تحميل الوحدة")
+                self._safe_log("❌ tv_datafeed: تعذّر تحميل الوحدة")
             except Exception as _e:
-                self._on_bot_scan_signal(f"❌ tv_datafeed توقف: {_e}")
+                self._safe_log(f"❌ tv_datafeed توقف: {_e}")
 
         self._tv_thread = _thr.Thread(target=_run, daemon=True, name="TVDataFeed")
         self._tv_thread.start()
