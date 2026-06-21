@@ -7922,7 +7922,7 @@ class TradingApp(QMainWindow):
         # تحديد رمز التنفيذ
         exec_symbol = self._get_execution_symbol(symbol)
         if exec_symbol != symbol:
-            self._on_bot_scan_signal(
+            self._safe_log(
                 f"🔀 تحليل={symbol} → تنفيذ={exec_symbol} "
                 f"({'ساعات رسمية SPX' if exec_symbol == 'SPX' else 'خارج الساعات XSP'})"
             )
@@ -7936,25 +7936,25 @@ class TradingApp(QMainWindow):
         with self._signal_lock:
             last_t = self._signal_cooldown.get(exec_symbol, 0)
             if _time.time() - last_t < 300:   # ✅ رُفع من 60 إلى 300 ثانية (5 دقائق)
-                self._on_bot_scan_signal(
+                self._safe_log(
                     f"  ⏭ {exec_symbol} cooldown ({int(300-(_time.time()-last_t))}s)"
                 )
                 return
             self._signal_cooldown[exec_symbol] = _time.time()
 
         print(f"[SIGNAL] تحليل={symbol} تنفيذ={exec_symbol} {direction} {pct}%")
-        self._on_bot_scan_signal(
+        self._safe_log(
             f"📨 إشارة: تحليل={symbol} | تنفيذ={exec_symbol} | {direction} {pct}%"
         )
         engine = getattr(self, '_exec_engine', None)
         if engine is None:
-            self._on_bot_scan_signal("❌ ExecutionEngine غير مهيأ")
+            self._safe_log("❌ ExecutionEngine غير مهيأ")
             return
 
         engine_open = getattr(engine, 'open_positions', {})
         bot_open_syms = {v.get('symbol','') for v in engine_open.values() if isinstance(v, dict)}
         if exec_symbol in bot_open_syms:
-            self._on_bot_scan_signal(f"  ⏭ {exec_symbol} مفتوح بالفعل")
+            self._safe_log(f"  ⏭ {exec_symbol} مفتوح بالفعل")
             return
 
         # نسخ cache الإشارة من رمز التحليل إلى رمز التنفيذ (SPY→SPX)
@@ -7969,7 +7969,7 @@ class TradingApp(QMainWindow):
         def _run():
             _bridge = getattr(self, '_smart_bridge', None)
             try:
-                engine.set_log_fn(self._on_bot_scan_signal)
+                engine.set_log_fn(self._safe_log)
 
                 # ── الرصيد مباشرة من account_balance ──────────
                 bal = float(getattr(self, 'account_balance', 0.0) or 0.0)
@@ -7992,7 +7992,7 @@ class TradingApp(QMainWindow):
                         pass
 
                 if bal <= 0:
-                    self._on_bot_scan_signal(
+                    self._safe_log(
                         f"  ❌ {symbol}: رصيد = 0 — تحقق من اتصال IBKR وإعدادات الحساب"
                     )
                     # أزل الحجب من _active_signals حتى تتمكن إشارة قادمة من العمل
@@ -8004,7 +8004,7 @@ class TradingApp(QMainWindow):
                     engine.balance = bal
 
                 stats = engine.get_stats()
-                self._on_bot_scan_signal(
+                self._safe_log(
                     f"  💰 رصيد=${bal:,.0f} | مفتوحة={stats['open_trades']} | "
                     f"يومي={stats['daily_trades']} | dry_run={engine.cfg.dry_run}"
                 )
@@ -8021,7 +8021,7 @@ class TradingApp(QMainWindow):
                     _cached.get('entry_price', 0) or 0
                 )
 
-                self._on_bot_scan_signal(
+                self._safe_log(
                     f"  🚀 {symbol} {direction} {pct}% → execute_signal "
                     f"SL={_sl_price:.2f} TP1={_tp1_price:.2f} entry=${_entry_stk:.2f}"
                 )
@@ -8034,7 +8034,7 @@ class TradingApp(QMainWindow):
                 print(f'[EXEC] نتيجة: {trade_id}')
 
                 if trade_id:
-                    self._on_bot_scan_signal(f"  ✅ نُفذت | ID={str(trade_id)[:8]}")
+                    self._safe_log(f"  ✅ نُفذت | ID={str(trade_id)[:8]}")
                     pos = engine.open_positions.get(trade_id, {})
                     if pos:
                         trade_info = {
@@ -8069,14 +8069,14 @@ class TradingApp(QMainWindow):
                             self.auto_bot.signal_new_trade.emit(trade_info)
                 else:
                     reason = getattr(engine, "last_reject_reason", "") or "رُفضت"
-                    self._on_bot_scan_signal(f"  ❌ {symbol}: {reason}")
+                    self._safe_log(f"  ❌ {symbol}: {reason}")
                     # ← أزل الحجب حتى تتمكن إشارة قادمة من العمل بعد 5 دقائق
                     if _bridge:
                         _bridge._active_signals.pop(symbol, None)
 
             except Exception as e:
                 import traceback
-                self._on_bot_scan_signal(f"  ❌ {symbol}: استثناء: {e}")
+                self._safe_log(f"  ❌ {symbol}: استثناء: {e}")
                 print(traceback.format_exc())
                 if _bridge:
                     _bridge._active_signals.pop(symbol, None)
@@ -8213,7 +8213,6 @@ class TradingApp(QMainWindow):
 
         # ── ربط الـ signals ──────────────────────────────────────
         _analyzer.log_msg.connect(self.auto_bot.signal_scan_update.emit)
-        _analyzer.log_msg.connect(self._on_bot_scan_signal)
 
         if not hasattr(self, '_analyzer_signal_cache'):
             self._analyzer_signal_cache = {}
@@ -8320,6 +8319,14 @@ class TradingApp(QMainWindow):
             f"Score≥{sc_min} | ATR×{atr_m} | TP×{tp_r} | "
             f"MaxC={max_c}{streak_txt}"
         )
+
+    def _safe_log(self, msg: str) -> None:
+        """Thread-safe UI log. Routes through signal_scan_update (PyQt queued) from any thread."""
+        asu = getattr(getattr(self, 'auto_bot', None), 'signal_scan_update', None)
+        if asu is not None:
+            asu.emit(msg)
+        else:
+            self._on_bot_scan_signal(msg)
 
     def _on_bot_scan_signal(self, msg):
         if not msg: return
