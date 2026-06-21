@@ -70,8 +70,10 @@ ADX_TREND_MIN = 25.0
 # ── Execution quality gate (Grade A signals only) ─────────────────────────────
 # These thresholds further filter Grade A signals before live routing.
 # B / C / D remain display-only regardless.
-EXEC_RANK_MIN: float    = 75.0          # minimum rank_score for execution
-EXEC_BLOCKED_SYMS: set  = {"AAPL"}     # symbols blocked from live execution (temporary)
+EXEC_RANK_MIN: float        = 75.0   # minimum rank_score
+EXEC_ADX_MIN: float         = 40.0   # strong-trend floor (regime gate requires 25; execution requires 40)
+EXEC_ENTRY_OFFSET_MAX: int  = 4      # confirmation must arrive by bar 4 after birth (bars 2-4)
+EXEC_BLOCKED_SYMS: set      = {"AAPL"}  # symbols blocked from live execution (temporary)
 
 CHART_DIR = _BC_CHART_DIR
 SYMBOLS   = list(_BC_SYMBOLS)
@@ -90,9 +92,11 @@ def passes_exec_gate(sig: Dict) -> tuple:
       1. rank_score >= EXEC_RANK_MIN (75)
       2. rvi_bucket == "High"
       3. regime == "Trend"
-      4. atr_pct <= ATR_THRESHOLD (0.52)
-      5. symbol not in EXEC_BLOCKED_SYMS  (currently {"AAPL"})
-      6. session_min < SESSION_CUTOFF (no trades at or after 14:15 ET)
+      4. adx >= EXEC_ADX_MIN (40)          -- strong trend, not just emerging trend
+      5. entry_offset <= EXEC_ENTRY_OFFSET_MAX (4)  -- confirmation within 4 bars
+      6. atr_pct <= ATR_THRESHOLD (0.52)
+      7. symbol not in EXEC_BLOCKED_SYMS  (currently {"AAPL"})
+      8. session_min < SESSION_CUTOFF (no trades at or after 14:15 ET)
     """
     rank = sig.get("rank_score", 0.0)
     if rank < EXEC_RANK_MIN:
@@ -105,6 +109,14 @@ def passes_exec_gate(sig: Dict) -> tuple:
     regime = sig.get("regime", "")
     if regime != "Trend":
         return False, f"regime={regime!r} (need Trend)"
+
+    adx = sig.get("adx", 0.0)
+    if adx < EXEC_ADX_MIN:
+        return False, f"adx={adx:.1f} < {EXEC_ADX_MIN}"
+
+    eoff = sig.get("entry_offset", 999)
+    if eoff > EXEC_ENTRY_OFFSET_MAX:
+        return False, f"entry_offset={eoff} > {EXEC_ENTRY_OFFSET_MAX}"
 
     atr_pct = sig.get("atr_pct", 999.0)
     if atr_pct > ATR_THRESHOLD:
@@ -577,6 +589,7 @@ class MarketAnalyzerEngine:
             blocked = ", ".join(sorted(EXEC_BLOCKED_SYMS)) or "none"
             self.log_msg.emit(
                 f"[BC Bridge]  Exec gate: score>={EXEC_RANK_MIN}  RVI=High  Trend  "
+                f"ADX>={EXEC_ADX_MIN}  offset<={EXEC_ENTRY_OFFSET_MAX}  "
                 f"ATR<={ATR_THRESHOLD}  blocked={blocked}  before 14:15 ET"
             )
         else:
