@@ -93,7 +93,11 @@ ANALYZER_MODE = "BC"
 
 # Grade A (Trend + High RVI) live execution gate for BC mode.
 # Requires ANALYZER_MODE="BC".  False = paper/display only (safe default).
-ENABLE_LIVE_BC = True
+ENABLE_LIVE_BC  = True
+
+# ORB Daily Engine live execution gate (Opening Range Breakout).
+# Requires ANALYZER_MODE="BC".  Shares execution pipeline with B+C.
+ENABLE_LIVE_ORB = True
 
 if ANALYZER_MODE == "BC":
     from smart_analyzer_bridge_bc import MarketAnalyzerEngine
@@ -101,6 +105,10 @@ if ANALYZER_MODE == "BC":
         print('[App] ✅ BC LIVE-GATED MODE — Grade A only — REAL EXECUTION ENABLED')
     else:
         print('[App] ⚠️  BC PAPER MODE — signals only — NO LIVE ORDERS')
+    if ENABLE_LIVE_ORB:
+        print('[App] ✅ ORB DAILY ENGINE — ADX>=30 RVOL>=1.5x — REAL EXECUTION ENABLED')
+    else:
+        print('[App] ⚠️  ORB DISPLAY ONLY — no live ORB orders')
 else:
     try:
         from smart_analyzer_bridge_x1 import MarketAnalyzerEngine
@@ -4784,8 +4792,8 @@ class ProChartWidget(QWidget):
             if len(bx): self._pp.plot(bx,by,pen=_mk(C['bull'],1),connect='finite')
             if len(rx): self._pp.plot(rx,ry,pen=_mk(C['bear'],1),connect='finite')
             bi=np.where(bull)[0]; ri=np.where(bear)[0]
-            if len(bi): self._pp.addItem(pg.BarGraphItem(x=xs[bi],height=(c-o)[bi],y0=o[bi],width=cw,brushes=[_br(C['bull'],200)]*len(bi),pens=[_mk(C['bull'])]*len(bi)))
-            if len(ri): self._pp.addItem(pg.BarGraphItem(x=xs[ri],height=(c-o)[ri],y0=o[ri],width=cw,brushes=[_br(C['bear'],200)]*len(ri),pens=[_mk(C['bear'])]*len(ri)))
+            if len(bi): self._pp.addItem(pg.BarGraphItem(x=xs[bi],height=(c-o)[bi],y0=o[bi],width=cw,brush=_br(C['bull'],200),pen=_mk(C['bull'])))
+            if len(ri): self._pp.addItem(pg.BarGraphItem(x=xs[ri],height=(c-o)[ri],y0=o[ri],width=cw,brush=_br(C['bear'],200),pen=_mk(C['bear'])))
 
         self._draw_live_candle(self._opens[-1],self._highs[-1],self._lows[-1],self._closes[-1],n-1)
         self._draw_volume(v,o,c,xs,n)
@@ -4809,19 +4817,38 @@ class ProChartWidget(QWidget):
         self._toolbar.update_price(self._sym,self._live_price,self._open_price)
 
     # ── رسم فرعي ─────────────────────────────────────────────────────────────
-    def _draw_sessions(self,n):
+    def _draw_sessions(self, n):
+        """Draw session background bands. Groups consecutive same-session bars into
+        one LinearRegionItem per span instead of one per bar (was O(n) addItem calls)."""
         if not self._times: return
-        for i,t in enumerate(self._times):
-            ts=str(t)[-5:]
-            try: hh,mm=int(ts[:2]),int(ts[3:5])
-            except: continue
-            mins=hh*60+mm
-            if   mins<9*60+30: col=C['pre']
-            elif mins<16*60:   col=C['reg']
-            elif mins<20*60:   col=C['ah']
-            else: continue
-            r=pg.LinearRegionItem([i-0.5,i+0.5],orientation='vertical',movable=False,brush=_br(col,70),pen=pg.mkPen(None))
-            self._pp.addItem(r,ignoreBounds=True)
+        spans = []          # (x_start, x_end, color)
+        cur_col   = None
+        cur_start = 0
+        for i, t in enumerate(self._times):
+            ts = str(t)[-5:]
+            try:
+                hh, mm = int(ts[:2]), int(ts[3:5])
+                mins = hh * 60 + mm
+                if   mins < 9 * 60 + 30: col = C['pre']
+                elif mins < 16 * 60:     col = C['reg']
+                elif mins < 20 * 60:     col = C['ah']
+                else:                    col = None
+            except:
+                col = None
+            if col != cur_col:
+                if cur_col is not None and cur_start < i:
+                    spans.append((cur_start, i, cur_col))
+                cur_col   = col
+                cur_start = i
+        if cur_col is not None and cur_start < n:
+            spans.append((cur_start, n, cur_col))
+        for x0, x1, col in spans:
+            r = pg.LinearRegionItem(
+                [x0 - 0.5, x1 - 0.5],
+                orientation='vertical', movable=False,
+                brush=_br(col, 70), pen=pg.mkPen(None)
+            )
+            self._pp.addItem(r, ignoreBounds=True)
 
     def _draw_zones(self, n):
         """
@@ -4962,8 +4989,9 @@ class ProChartWidget(QWidget):
 
     def _draw_volume(self,v,o,c,xs,n):
         if not len(v): return
-        bull=c>=o; brs=[_br(C['vbull']) if b else _br(C['vbear']) for b in bull]; pns=[_mk(C['bull'],0.5) if b else _mk(C['bear'],0.5) for b in bull]
-        self._vp.addItem(pg.BarGraphItem(x=xs,height=v,y0=0,width=self._candle_w,brushes=brs,pens=pns))
+        bull=c>=o; bi=np.where(bull)[0]; ri=np.where(~bull)[0]
+        if len(bi): self._vp.addItem(pg.BarGraphItem(x=xs[bi],height=v[bi],y0=0,width=self._candle_w,brush=_br(C['vbull']),pen=_mk(C['bull'],0.5)))
+        if len(ri): self._vp.addItem(pg.BarGraphItem(x=xs[ri],height=v[ri],y0=0,width=self._candle_w,brush=_br(C['vbear']),pen=_mk(C['bear'],0.5)))
         if n>=20:
             ma=np.convolve(v,np.ones(20)/20,mode='valid'); self._vp.plot(list(range(19,n)),list(ma),pen=_mk(C['e9'],1))
 
@@ -4980,9 +5008,10 @@ class ProChartWidget(QWidget):
 
     def _draw_macd(self,n):
         if not self._macd_h: return
-        xs=np.arange(len(self._macd_h),dtype=float); bull=[v>=0 for v in self._macd_h]
-        brs=[_br(C['bull'],180) if b else _br(C['bear'],180) for b in bull]; pns=[_mk(C['bull'],0.5) if b else _mk(C['bear'],0.5) for b in bull]
-        self._mp.addItem(pg.BarGraphItem(x=xs,height=self._macd_h,y0=0,width=min(0.7,self._candle_w),brushes=brs,pens=pns))
+        xs=np.arange(len(self._macd_h),dtype=float); mh=np.array(self._macd_h,dtype=float)
+        bi=np.where(mh>=0)[0]; ri=np.where(mh<0)[0]
+        if len(bi): self._mp.addItem(pg.BarGraphItem(x=xs[bi],height=mh[bi],y0=0,width=min(0.7,self._candle_w),brush=_br(C['bull'],180),pen=_mk(C['bull'],0.5)))
+        if len(ri): self._mp.addItem(pg.BarGraphItem(x=xs[ri],height=mh[ri],y0=0,width=min(0.7,self._candle_w),brush=_br(C['bear'],180),pen=_mk(C['bear'],0.5)))
         if self._macd_l:
             _vl=[(xs[i],self._macd_l[i]) for i in range(len(self._macd_l)) if self._macd_l[i] is not None]
             if _vl: _vx,_vy=zip(*_vl); self._mp.plot(list(_vx),list(_vy),pen=_mk('#2196f3',1))
@@ -5537,6 +5566,23 @@ class TradingApp(QMainWindow):
         self._ui_sl_timer.timeout.connect(self._ui_check_sl_tp)
         QTimer.singleShot(1000, lambda: self._ui_sl_timer.start(5000))
 
+        # ── [PROFILING] UI freeze detector + log flood counters ───────────
+        self._prof_last_hb     = time.perf_counter()
+        self._prof_last_action = 'init'
+        self._prof_log_cnt     = 0;  self._prof_log_sec    = int(time.time())
+        self._prof_insert_cnt  = 0;  self._prof_insert_sec = int(time.time())
+        self._prof_hb_timer    = QTimer()
+        self._prof_hb_timer.timeout.connect(self._prof_heartbeat)
+        self._prof_hb_timer.start(500)
+
+    def _prof_heartbeat(self):
+        """[PROFILING] Fires every 500 ms. Logs if UI thread was blocked >1500 ms."""
+        now = time.perf_counter()
+        elapsed_ms = (now - self._prof_last_hb) * 1000
+        if elapsed_ms > 1500:
+            print(f'[UI FREEZE] blocked {elapsed_ms:.0f}ms  last_action={self._prof_last_action}', flush=True)
+        self._prof_last_hb = now
+
     def _ui_check_sl_tp(self):
         """مراقبة SL/TP من الواجهة — تعمل دائماً بغض النظر عن البوت"""
         if not self.connected: return
@@ -5650,6 +5696,9 @@ class TradingApp(QMainWindow):
     # -----------------------------------------------
     def _auto_refresh_chart(self):
         """تحديث الشارت — السعر كل ثانية، بيانات كاملة كل 30 ثانية"""
+        # [PROFILING]
+        self._prof_last_action = '_auto_refresh_chart'
+        _prof_arc_t0 = time.perf_counter()
         if not self.connected or not self._pro_chart:
             return
         sym = getattr(self, 'current_symbol', None)
@@ -5658,7 +5707,11 @@ class TradingApp(QMainWindow):
         # ── تحديث السعر الحي فوراً (كل مرة) ──────────────────────────────
         live = getattr(self, 'current_price', None)
         if live and live > 0:
+            _prof_pp_t0 = time.perf_counter()
             self._pro_chart.push_price(live)
+            _prof_pp_ms = (time.perf_counter() - _prof_pp_t0) * 1000
+            if _prof_pp_ms > 50:
+                print(f'[PROF SLOW] push_price: {_prof_pp_ms:.1f}ms', flush=True)
         # ── تحديث بيانات كاملة كل 30 ثانية ──────────────────────────────
         _now  = datetime.now()
         _last = getattr(self, '_last_full_chart_refresh', None)
@@ -5666,6 +5719,10 @@ class TradingApp(QMainWindow):
             self._last_full_chart_refresh = _now
             threading.Thread(
                 target=self._fetch_chart, args=(sym,), daemon=True).start()
+        # [PROFILING] log if _auto_refresh_chart itself is slow
+        _prof_arc_ms = (time.perf_counter() - _prof_arc_t0) * 1000
+        if _prof_arc_ms > 50:
+            print(f'[PROF SLOW] _auto_refresh_chart: {_prof_arc_ms:.1f}ms', flush=True)
 
     def _set_fallback_dates(self):
         self.expiry_combo.blockSignals(True)
@@ -7322,6 +7379,8 @@ class TradingApp(QMainWindow):
         return scroll
 
     def connect_ibkr(self):
+        # [PROFILING]
+        self._prof_last_action = 'connect_ibkr'
         self.statusBar().showMessage("جاري الاتصال بـ IBKR...")
         self.connect_btn.setEnabled(False)
         def _run():
@@ -7790,7 +7849,7 @@ class TradingApp(QMainWindow):
                 tv   = TVDataFeed()
                 self._datafeed_tv = tv
                 tfs  = ["5", "15", "60"]
-                bars = 2000
+                bars = 500
 
                 _iv_path   = _os.path.join(_app_dir(), "iv_cache.json")
                 iv_history = {}
@@ -7921,6 +7980,8 @@ class TradingApp(QMainWindow):
 
     def _on_analyzer_trade_signal(self, symbol: str, direction: str, pct: int):
         """يستقبل trade_signal من المحلل في main thread ويُنفذ في thread منفصل."""
+        # [PROFILING]
+        self._prof_last_action = f'_on_analyzer_trade_signal({symbol},{direction})'
         import time as _time
 
         # تحديد رمز التنفيذ
@@ -8089,6 +8150,9 @@ class TradingApp(QMainWindow):
         _th.Thread(target=_run, daemon=True).start()
 
     def _do_toggle_bot(self):
+        # [PROFILING]
+        self._prof_last_action = '_do_toggle_bot:enter'
+        _prof_dtb_t0 = time.perf_counter()
         # ── إيقاف ──────────────────────────────────────────
         if self.auto_bot and self.auto_bot.isRunning():
             self.bot_btn.setEnabled(False)
@@ -8170,6 +8234,7 @@ class TradingApp(QMainWindow):
             min_contract_cost      = 70.0,  # ✅ حد أدنى $70 للعقد
             max_contract_cost      = 160.0, # ✅ حد أقصى $160 للعقد
         )
+        self._prof_last_action = '_do_toggle_bot:ExecutionEngine'
         self._exec_engine = ExecutionEngine(self.ib, _ecfg)
 
         # ✅ سجّل run_in_ib_thread
@@ -8186,9 +8251,16 @@ class TradingApp(QMainWindow):
         # MarketAnalyzerEngine هنا هو واجهة التوافق الموجودة في smart_analyzer_bridge
         # تشغّل SmartDayTradingAnalyzer من analyzer.py مباشرة
         # In BC mode pass enable_live_bc so Grade A signals can reach execution.
-        _analyzer = (MarketAnalyzerEngine(self.ib, enable_live_bc=ENABLE_LIVE_BC)
-                     if ANALYZER_MODE == "BC" else MarketAnalyzerEngine(self.ib))
+        self._prof_last_action = '_do_toggle_bot:MarketAnalyzerEngine'
+        _prof_mae_t0 = time.perf_counter()
+        _analyzer = (
+            MarketAnalyzerEngine(self.ib, enable_live_bc=ENABLE_LIVE_BC,
+                                 enable_live_orb=ENABLE_LIVE_ORB)
+            if ANALYZER_MODE == "BC" else MarketAnalyzerEngine(self.ib)
+        )
         _analyzer.set_app(self, self._exec_engine)
+        print(f'[PROF] MarketAnalyzerEngine+set_app: {(time.perf_counter()-_prof_mae_t0)*1000:.0f}ms', flush=True)
+        self._prof_last_action = '_do_toggle_bot:set_app_done'
         self._on_bot_scan_signal("🧠 SmartDayTradingAnalyzer — المحلل الوحيد النشط")
 
         _syms = getattr(self, 'auto_bot_scan_symbols', None)
@@ -8238,8 +8310,12 @@ class TradingApp(QMainWindow):
         _analyzer._app = self
         self._market_analyzer = _analyzer   # يُستخدم في _on_new_trade و_on_close_trade
 
+        self._prof_last_action = '_do_toggle_bot:analyzer.start'
+        _prof_as_t0 = time.perf_counter()
         _analyzer.start()
         self.auto_bot.start()
+        print(f'[PROF] analyzer.start+auto_bot.start: {(time.perf_counter()-_prof_as_t0)*1000:.0f}ms', flush=True)
+        self._prof_last_action = '_do_toggle_bot:bots_started'
         # In BC mode expose the inner BCPaperBridge so _on_analyzer_trade_signal
         # can release _active_signals locks on execution failure or completion.
         self._smart_bridge = (
@@ -8264,6 +8340,7 @@ class TradingApp(QMainWindow):
         # ── تشغيل tv_datafeed — مؤجّل لإتاحة رسم الـ UI أولاً ─────────
         QTimer.singleShot(0, self._start_tv_datafeed)
 
+        self._prof_last_action = '_do_toggle_bot:MonitorThread'
         self.monitor_thread = MonitorThread(
             self.ib, self.position_manager,
             self.risk_manager, None, auto_execute=True
@@ -8284,6 +8361,8 @@ class TradingApp(QMainWindow):
         self.bot_btn.setStyleSheet(
             "background:#ff5e57;color:white;font-size:13px;font-weight:bold;padding:10px;")
         self.statusBar().showMessage(f"🤖 البوت يعمل — {_mode}")
+        print(f'[PROF] _do_toggle_bot total: {(time.perf_counter()-_prof_dtb_t0)*1000:.0f}ms', flush=True)
+        self._prof_last_action = '_do_toggle_bot:done'
     def _open_backtest(self):
         """فتح نافذة الباك‑تست"""
         dlg = PerformanceDashboard(self)
@@ -8336,6 +8415,15 @@ class TradingApp(QMainWindow):
             self._on_bot_scan_signal(msg)
 
     def _on_bot_scan_signal(self, msg):
+        # [PROFILING] flood counter + slow detection
+        _prof_bss_t0 = time.perf_counter()
+        self._prof_last_action = f'_on_bot_scan_signal'
+        _sec = int(time.time())
+        if _sec != self._prof_log_sec:
+            if self._prof_log_cnt > 20:
+                print(f'[PROF LOG FLOOD] _on_bot_scan_signal: {self._prof_log_cnt} calls/sec', flush=True)
+            self._prof_log_cnt = 0; self._prof_log_sec = _sec
+        self._prof_log_cnt += 1
         if not msg: return
         important = ['🎯','🏆','🚀','⚠','❌','CALL','PUT','📨','⏭','💰','⛔','🌍',
                      '📈','📉','📦','📋','📥','🔎','🧪','🥇','↔','⊘',
@@ -8343,12 +8431,20 @@ class TradingApp(QMainWindow):
                      'يمسح','scanning','إشارات','إشارة','توافق','اتجاه','خسائر',
                      '📊','📈','📉','⚪','تحليل','ADX','✅','🔍','cooldown','نُفذت','DRY',
                      'FILLED','chains','strike','budget','سبريد','delta','qualify',
-                     'Breakout','Pullback','Trend','SL=','TP1=','TP2=']
+                     'Breakout','Pullback','Trend','SL=','TP1=','TP2=',
+                     'ORB Daily','ORB LIVE','Source: B+C','Source: ORB']
         if not any(k in msg for k in important): return
         # تجنب تكرار نفس الرسالة
         if self.signals_list.count() > 0:
             if self.signals_list.item(0).text() == msg:
                 return
+        # [PROFILING] insertItem counter
+        _ins_sec = int(time.time())
+        if _ins_sec != self._prof_insert_sec:
+            if self._prof_insert_cnt > 20:
+                print(f'[PROF LOG FLOOD] signals_list.insertItem: {self._prof_insert_cnt} inserts/sec', flush=True)
+            self._prof_insert_cnt = 0; self._prof_insert_sec = _ins_sec
+        self._prof_insert_cnt += 1
         self.signals_list.insertItem(0, msg)
         if 'CALL' in msg or '🎯' in msg or '🏆' in msg or '🚀' in msg:
             color = "#05c46b"
@@ -8363,6 +8459,10 @@ class TradingApp(QMainWindow):
         self.signals_list.item(0).setForeground(QBrush(QColor(color)))
         if self.signals_list.count() > 100:
             self.signals_list.takeItem(100)
+        # [PROFILING] slow call detection
+        _prof_bss_ms = (time.perf_counter() - _prof_bss_t0) * 1000
+        if _prof_bss_ms > 30:
+            print(f'[PROF SLOW] _on_bot_scan_signal: {_prof_bss_ms:.1f}ms  msg={msg[:50]!r}', flush=True)
 
     def _on_risk_alert(self, msg):
         self.signals_list.insertItem(0, msg)
@@ -9517,6 +9617,9 @@ class TradingApp(QMainWindow):
 
     def _apply_chart_data(self, bars_data):
         """تطبيق البيانات على ProChart في main thread"""
+        # [PROFILING]
+        self._prof_last_action = '_apply_chart_data'
+        _prof_acd_t0 = time.perf_counter()
         # ── حفظ بيانات الأعمدة لتحديث المؤشرات الجانبية بالسعر الحي ──
         try:
             _c = bars_data.get('closes', [])
@@ -9542,7 +9645,9 @@ class TradingApp(QMainWindow):
             except Exception:
                 pass
 
+            _prof_sd_t0 = time.perf_counter()
             self._pro_chart.set_data(bars_data, max_bars=300)
+            print(f'[PROF] set_data: {(time.perf_counter()-_prof_sd_t0)*1000:.0f}ms  bars={len(bars_data.get("closes",[]))}', flush=True)
 
             # ── رسم Order Blocks + S/D Zones ────────────────────────
             try:
@@ -9604,6 +9709,9 @@ class TradingApp(QMainWindow):
             )
         except Exception as _re:
             print(f"[ReversePanel] {_re}")
+        # [PROFILING]
+        print(f'[PROF] _apply_chart_data total: {(time.perf_counter()-_prof_acd_t0)*1000:.0f}ms', flush=True)
+        self._prof_last_action = '_apply_chart_data:done'
 
     def _open_chart_window(self):
         """فتح الشارت JavaScript في نافذة مستقلة"""
@@ -10098,6 +10206,9 @@ class TradingApp(QMainWindow):
         يشغّل tv_datafeed كـ Thread داخلي — بدون عمليات خارجية أو نوافذ.
         يعمل داخل نفس البرنامج سواء كـ .py أو .exe مجمّع.
         """
+        # [PROFILING]
+        self._prof_last_action = '_start_tv_datafeed'
+        _prof_tvdf_t0 = time.perf_counter()
         import threading as _thr
 
         # منع تشغيل نسخة ثانية
@@ -10116,7 +10227,7 @@ class TradingApp(QMainWindow):
 
                 _symbols  = list(getattr(self, "auto_bot_scan_symbols", X1_SCAN_SYMBOLS))
                 _tfs      = ["15", "60", "1D"]
-                _bars     = 2000
+                _bars     = 500
                 _interval = 60          # ثانية بين كل دورة
                 _partial  = 50          # شموع في الدورات السريعة
                 _keep     = 2000
@@ -10187,6 +10298,8 @@ class TradingApp(QMainWindow):
 
         self._tv_thread = _thr.Thread(target=_run, daemon=True, name="TVDataFeed")
         self._tv_thread.start()
+        print(f'[PROF] _start_tv_datafeed (UI-thread setup): {(time.perf_counter()-_prof_tvdf_t0)*1000:.0f}ms', flush=True)
+        self._prof_last_action = '_start_tv_datafeed:done'
         self._on_bot_scan_signal("🔄 tv_datafeed يُحمّل البيانات (أول دورة)...")
 
     def closeEvent(self, event):

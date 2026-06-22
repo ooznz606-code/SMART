@@ -31,6 +31,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set
 
+# -- ORB Daily Engine (second signal source) ----------------------------------
+from smart_analyzer_bridge_orb import ORBDailyBridge
+
 # -- Production analyzer (signal detection only) ------------------------------
 try:
     from analyzer_bc_core import (
@@ -366,7 +369,7 @@ class BCPaperBridge:
             f"Grade={grade}  "
             f"Score={sig.get('rank_score', 0):.1f}  |  "
             f"Date={sig.get('date', '')} {sig.get('birth_time', '')}  "
-            f"|  {tag}"
+            f"|  Source: B+C Sniper  |  {tag}"
         )
 
         if is_live:
@@ -559,11 +562,14 @@ class MarketAnalyzerEngine:
                 except Exception:
                     pass
 
-    def __init__(self, ib=None, parent=None, enable_live_bc: bool = False):
-        self._ib             = ib
-        self._app            = None
-        self._enable_live_bc = enable_live_bc
-        self._bridge: Optional[BCPaperBridge] = None
+    def __init__(self, ib=None, parent=None, enable_live_bc: bool = False,
+                 enable_live_orb: bool = False):
+        self._ib              = ib
+        self._app             = None
+        self._enable_live_bc  = enable_live_bc
+        self._enable_live_orb = enable_live_orb
+        self._bridge:     Optional[BCPaperBridge]  = None
+        self._orb_bridge: Optional[ORBDailyBridge] = None
         self.log_msg         = self._Sig()
         self.trade_signal    = self._Sig()    # never emitted -- routing is direct
         self.profile_updated = self._Sig()    # never emitted
@@ -576,6 +582,12 @@ class MarketAnalyzerEngine:
             app=app,
             log_fn=self.log_msg.emit,
             enable_live_bc=self._enable_live_bc,
+        )
+        self._orb_bridge = ORBDailyBridge(
+            app=app,
+            log_fn=self.log_msg.emit,
+            enable_live_orb=self._enable_live_orb,
+            bc_bridge=self._bridge,
         )
 
     def start(self) -> None:
@@ -599,10 +611,16 @@ class MarketAnalyzerEngine:
             self._bridge.start()
         else:
             self.log_msg.emit("[BC Bridge] ERROR: bridge not initialised (call set_app first)")
+        if self._orb_bridge:
+            self._orb_bridge.start()
+        else:
+            self.log_msg.emit("[ORB Bridge] ERROR: ORB bridge not initialised (call set_app first)")
 
     def stop(self) -> None:
         if self._bridge:
             self._bridge.stop()
+        if self._orb_bridge:
+            self._orb_bridge.stop()
 
     def quit(self) -> None:
         self.stop()
@@ -610,6 +628,8 @@ class MarketAnalyzerEngine:
     def wait(self, ms: int = 3000) -> None:
         if self._bridge:
             self._bridge.wait(ms)
+        if self._orb_bridge:
+            self._orb_bridge.wait(ms)
 
     def register_trade(self, *args, **kwargs) -> None:
         pass
