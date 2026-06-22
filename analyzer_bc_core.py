@@ -81,6 +81,7 @@ SIM_BARS       = 40
 SYMBOLS: List[str] = [
     "AAPL", "AMD",  "TSLA", "AVGO", "COST", "LLY",  "PANW", "CRM",
     "QQQ",  "SPY",  "MSFT", "META", "AMZN", "GOOGL", "NVDA", "NFLX",
+    "UBER",
 ]
 
 CHART_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chart_data")
