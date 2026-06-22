@@ -7,6 +7,7 @@ Runs alongside BCPaperBridge as a second signal source (Hybrid Engine).
 
 Rules:
   ADX >= 30  |  RVOL >= 1.5x  |  Bias = not-counter (SPY+QQQ EMA9/EMA20)
+  ORB range >= 2.0 ATR  |  EMA20 dist >= 1.95 ATR (direction-adjusted)
   Excluded:  AAPL, AMD, AVGO, COST, GOOGL, SPY, TSLA, UBER
   Stop = 1.5 ATR  |  Target = 2.7 ATR (=1.8R)  |  Max hold = 40 bars
   Top-3/day cap  |  Breakout window: 10:00-11:30 ET
@@ -32,10 +33,12 @@ from analyzer_x2 import Candle  # type only
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-ORB_EXCLUDED:  frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL", "SPY", "TSLA", "UBER"})
-ORB_ADX_MIN:   float     = 30.0
-ORB_RVOL_MIN:  float     = 1.5
-ORB_BODY_ATR:  float     = 0.25   # min candle body as fraction of ATR
+ORB_EXCLUDED:      frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL", "SPY", "TSLA", "UBER"})
+ORB_ADX_MIN:       float     = 30.0
+ORB_RVOL_MIN:      float     = 1.5
+ORB_BODY_ATR:      float     = 0.25   # min candle body as fraction of ATR
+ORB_RANGE_ATR_MIN: float     = 2.0    # ORB range must be >= 2.0x ATR
+ORB_EMA20_DIST_MIN: float    = 1.95   # price must be >= 1.95 ATR from EMA20 (direction-adjusted)
 
 SCAN_INTERVAL_SEC = 60
 DATA_STALE_MIN    = 30
@@ -151,9 +154,10 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
     cl  = [b.close  for b in bars]
     vol = [b.volume for b in bars]
 
-    atrs = _atr(bars, 14)
-    adxs = _adx(bars, 14)
-    rvs  = _rvol(vol, 20)
+    atrs   = _atr(bars, 14)
+    adxs   = _adx(bars, 14)
+    rvs    = _rvol(vol, 20)
+    ema20s = _ema(cl, 20)
 
     orb:     Dict[str, list] = {}   # date -> [high, low, locked]
     emitted: Set[tuple]      = set()
@@ -191,16 +195,19 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
         bias = bias_map.get(ts, "NEUTRAL")
         body = abs(b.close - b.open)
 
-        if adx  < ORB_ADX_MIN:       continue
-        if rv   < ORB_RVOL_MIN:      continue
-        if body < ORB_BODY_ATR * atr: continue
+        if adx  < ORB_ADX_MIN:        continue
+        if rv   < ORB_RVOL_MIN:       continue
+        if body < ORB_BODY_ATR * atr:  continue
+        if (oh - ol) / atr < ORB_RANGE_ATR_MIN: continue   # ORB Pro: range >= 2.0 ATR
 
         counter_long  = (bias == "BEAR")
         counter_short = (bias == "BULL")
         score_mult    = 1.3 if bias != "NEUTRAL" else 1.0
+        e20           = ema20s[i]
 
         if (b.close > oh and b.close > b.open
-                and not counter_long and (dt, "LONG") not in emitted):
+                and not counter_long and (dt, "LONG") not in emitted
+                and (b.close - e20) / atr >= ORB_EMA20_DIST_MIN):  # ORB Pro: EMA20 dist
             signals.append(dict(
                 symbol=sym, date=dt, entry_ts=ts, direction="LONG",
                 entry_price=b.close,
@@ -212,7 +219,8 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
             emitted.add((dt, "LONG"))
 
         if (b.close < ol and b.close < b.open
-                and not counter_short and (dt, "SHORT") not in emitted):
+                and not counter_short and (dt, "SHORT") not in emitted
+                and (e20 - b.close) / atr >= ORB_EMA20_DIST_MIN):  # ORB Pro: EMA20 dist
             signals.append(dict(
                 symbol=sym, date=dt, entry_ts=ts, direction="SHORT",
                 entry_price=b.close,
@@ -266,6 +274,7 @@ class ORBDailyBridge:
         mode = "LIVE" if self._enable_live else "DISPLAY ONLY"
         self._log(
             f"[ORB Bridge] started -- ADX>={ORB_ADX_MIN}  RVOL>={ORB_RVOL_MIN}x  "
+            f"ORBrng>={ORB_RANGE_ATR_MIN}ATR  EMA20dist>={ORB_EMA20_DIST_MIN}ATR  "
             f"bias=not-counter  excl={sorted(ORB_EXCLUDED)}  "
             f"Top-{TOP_N_DAY}/day  {mode}"
         )
@@ -511,12 +520,16 @@ class ORBDailyBridge:
 
 if __name__ == "__main__":
     print("=== smart_analyzer_bridge_orb self-test ===")
-    print(f"ORB_EXCLUDED : {sorted(ORB_EXCLUDED)}")
-    print(f"ORB_ADX_MIN  : {ORB_ADX_MIN}")
-    print(f"ORB_RVOL_MIN : {ORB_RVOL_MIN}")
-    print(f"TOP_N_DAY    : {TOP_N_DAY}")
-    print(f"CHART_DIR    : {CHART_DIR}")
-    print(f"Scan symbols : {[s for s in _LIVE_SYMBOLS if s not in ORB_EXCLUDED]}")
+    print(f"ORB_EXCLUDED      : {sorted(ORB_EXCLUDED)}")
+    print(f"ORB_ADX_MIN       : {ORB_ADX_MIN}")
+    print(f"ORB_RVOL_MIN      : {ORB_RVOL_MIN}")
+    print(f"ORB_RANGE_ATR_MIN : {ORB_RANGE_ATR_MIN}")
+    print(f"ORB_EMA20_DIST_MIN: {ORB_EMA20_DIST_MIN}")
+    print(f"TOP_N_DAY         : {TOP_N_DAY}")
+    print(f"CHART_DIR         : {CHART_DIR}")
+    print(f"Scan symbols      : {[s for s in _LIVE_SYMBOLS if s not in ORB_EXCLUDED]}")
+    assert ORB_RANGE_ATR_MIN  == 2.0,   f"ORB_RANGE_ATR_MIN unexpected: {ORB_RANGE_ATR_MIN}"
+    assert ORB_EMA20_DIST_MIN == 1.95,  f"ORB_EMA20_DIST_MIN unexpected: {ORB_EMA20_DIST_MIN}"
 
     class _FakeApp:
         class _FakeEngine:
