@@ -10,7 +10,7 @@ Rules:
   ORB range >= 2.0 ATR  |  EMA20 dist >= 1.95 ATR (direction-adjusted)
   Excluded:  AAPL, AMD, AVGO, COST, GOOGL, SPY, TSLA, UBER
   Stop = 1.5 ATR  |  Target = 2.7 ATR (=1.8R)  |  Max hold = 40 bars
-  Top-3/day cap  |  Breakout window: 10:00-11:30 ET
+  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Breakout window: 10:00-11:30 ET
 
 Source label: "ORB Daily"
 Priority:     B+C Sniper has priority -- if BC has active signal for a symbol,
@@ -39,6 +39,7 @@ ORB_RVOL_MIN:      float     = 1.5
 ORB_BODY_ATR:      float     = 0.25   # min candle body as fraction of ATR
 ORB_RANGE_ATR_MIN: float     = 2.0    # ORB range must be >= 2.0x ATR
 ORB_EMA20_DIST_MIN: float    = 1.95   # price must be >= 1.95 ATR from EMA20 (direction-adjusted)
+ORB_MAX_DIR_PER_DAY: int     = 2      # F2: max same-direction signals per day after Top-N cap
 
 SCAN_INTERVAL_SEC = 60
 DATA_STALE_MIN    = 30
@@ -137,6 +138,24 @@ def _build_bias(c15_map: Dict) -> Dict:
             else:
                 bias[b.timestamp] = "NEUTRAL"
     return bias
+
+
+# ── F2 direction cap ─────────────────────────────────────────────────────────
+
+def _f2_filter(signals: List[Dict]) -> List[Dict]:
+    """
+    F2: from a score-sorted list, allow at most ORB_MAX_DIR_PER_DAY signals
+    sharing the same direction on the same date.  Lowest-scoring excess dropped.
+    Assumes signals are pre-sorted highest score first.
+    """
+    dir_count: Dict[str, int] = {}
+    kept: List[Dict] = []
+    for s in signals:
+        key = f"{s['date']}|{s['direction']}"
+        if dir_count.get(key, 0) < ORB_MAX_DIR_PER_DAY:
+            dir_count[key] = dir_count.get(key, 0) + 1
+            kept.append(s)
+    return kept
 
 
 # ── ORB scanner ───────────────────────────────────────────────────────────────
@@ -275,6 +294,7 @@ class ORBDailyBridge:
         self._log(
             f"[ORB Bridge] started -- ADX>={ORB_ADX_MIN}  RVOL>={ORB_RVOL_MIN}x  "
             f"ORBrng>={ORB_RANGE_ATR_MIN}ATR  EMA20dist>={ORB_EMA20_DIST_MIN}ATR  "
+            f"F2:max-{ORB_MAX_DIR_PER_DAY}/dir/day  "
             f"bias=not-counter  excl={sorted(ORB_EXCLUDED)}  "
             f"Top-{TOP_N_DAY}/day  {mode}"
         )
@@ -350,7 +370,7 @@ class ORBDailyBridge:
                     all_today.append(s)
 
         all_today.sort(key=lambda x: -x["score"])
-        top_candidates = all_today[:TOP_N_DAY]
+        top_candidates = _f2_filter(all_today[:TOP_N_DAY])  # F2: max 2 per direction/day
 
         # Emit new signals up to daily cap
         emitted_today = self._day_count.get(today, 0)
@@ -530,6 +550,19 @@ if __name__ == "__main__":
     print(f"Scan symbols      : {[s for s in _LIVE_SYMBOLS if s not in ORB_EXCLUDED]}")
     assert ORB_RANGE_ATR_MIN  == 2.0,   f"ORB_RANGE_ATR_MIN unexpected: {ORB_RANGE_ATR_MIN}"
     assert ORB_EMA20_DIST_MIN == 1.95,  f"ORB_EMA20_DIST_MIN unexpected: {ORB_EMA20_DIST_MIN}"
+    assert ORB_MAX_DIR_PER_DAY == 2,    f"ORB_MAX_DIR_PER_DAY unexpected: {ORB_MAX_DIR_PER_DAY}"
+
+    # F2 filter: 3 same-direction signals on one day → keep top 2
+    _f2_input = [
+        dict(date="2026-06-11", direction="SHORT", score=203.8, symbol="META"),
+        dict(date="2026-06-11", direction="SHORT", score=89.8,  symbol="MSFT"),
+        dict(date="2026-06-11", direction="SHORT", score=56.3,  symbol="NFLX"),
+    ]
+    _f2_out = _f2_filter(_f2_input)
+    assert len(_f2_out) == 2,              f"F2 should keep 2, got {len(_f2_out)}"
+    assert _f2_out[0]["symbol"] == "META", f"F2 top-1 wrong: {_f2_out[0]['symbol']}"
+    assert _f2_out[1]["symbol"] == "MSFT", f"F2 top-2 wrong: {_f2_out[1]['symbol']}"
+    print("  F2 filter (3 SHORT -> 2, NFLX dropped): OK")
 
     class _FakeApp:
         class _FakeEngine:
