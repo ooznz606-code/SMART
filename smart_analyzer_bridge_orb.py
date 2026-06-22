@@ -10,7 +10,7 @@ Rules:
   ORB range >= 2.0 ATR  |  EMA20 dist >= 1.95 ATR (direction-adjusted)
   Excluded:  AAPL, AMD, AVGO, COST, GOOGL, SPY, TSLA, UBER
   Stop = 1.5 ATR  |  Target = 2.7 ATR (=1.8R)  |  Max hold = 40 bars
-  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Breakout window: 10:00-11:30 ET
+  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Break dist >= 0.05 ATR (F3)  |  Breakout window: 10:00-11:30 ET
 
 Source label: "ORB Daily"
 Priority:     B+C Sniper has priority -- if BC has active signal for a symbol,
@@ -40,6 +40,7 @@ ORB_BODY_ATR:      float     = 0.25   # min candle body as fraction of ATR
 ORB_RANGE_ATR_MIN: float     = 2.0    # ORB range must be >= 2.0x ATR
 ORB_EMA20_DIST_MIN: float    = 1.95   # price must be >= 1.95 ATR from EMA20 (direction-adjusted)
 ORB_MAX_DIR_PER_DAY: int     = 2      # F2: max same-direction signals per day after Top-N cap
+ORB_BREAK_DIST_MIN:  float   = 0.05   # F3: min breakout distance beyond ORB level (ATR units)
 
 SCAN_INTERVAL_SEC = 60
 DATA_STALE_MIN    = 30
@@ -226,7 +227,8 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
 
         if (b.close > oh and b.close > b.open
                 and not counter_long and (dt, "LONG") not in emitted
-                and (b.close - e20) / atr >= ORB_EMA20_DIST_MIN):  # ORB Pro: EMA20 dist
+                and (b.close - e20) / atr >= ORB_EMA20_DIST_MIN    # ORB Pro: EMA20 dist
+                and (b.close - oh)  / atr >= ORB_BREAK_DIST_MIN):  # F3: break dist
             signals.append(dict(
                 symbol=sym, date=dt, entry_ts=ts, direction="LONG",
                 entry_price=b.close,
@@ -239,7 +241,8 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
 
         if (b.close < ol and b.close < b.open
                 and not counter_short and (dt, "SHORT") not in emitted
-                and (e20 - b.close) / atr >= ORB_EMA20_DIST_MIN):  # ORB Pro: EMA20 dist
+                and (e20 - b.close) / atr >= ORB_EMA20_DIST_MIN    # ORB Pro: EMA20 dist
+                and (ol - b.close)  / atr >= ORB_BREAK_DIST_MIN):  # F3: break dist
             signals.append(dict(
                 symbol=sym, date=dt, entry_ts=ts, direction="SHORT",
                 entry_price=b.close,
@@ -294,7 +297,7 @@ class ORBDailyBridge:
         self._log(
             f"[ORB Bridge] started -- ADX>={ORB_ADX_MIN}  RVOL>={ORB_RVOL_MIN}x  "
             f"ORBrng>={ORB_RANGE_ATR_MIN}ATR  EMA20dist>={ORB_EMA20_DIST_MIN}ATR  "
-            f"F2:max-{ORB_MAX_DIR_PER_DAY}/dir/day  "
+            f"F2:max-{ORB_MAX_DIR_PER_DAY}/dir/day  F3:break>={ORB_BREAK_DIST_MIN}ATR  "
             f"bias=not-counter  excl={sorted(ORB_EXCLUDED)}  "
             f"Top-{TOP_N_DAY}/day  {mode}"
         )
@@ -545,12 +548,19 @@ if __name__ == "__main__":
     print(f"ORB_RVOL_MIN      : {ORB_RVOL_MIN}")
     print(f"ORB_RANGE_ATR_MIN : {ORB_RANGE_ATR_MIN}")
     print(f"ORB_EMA20_DIST_MIN: {ORB_EMA20_DIST_MIN}")
+    print(f"ORB_BREAK_DIST_MIN: {ORB_BREAK_DIST_MIN}")
     print(f"TOP_N_DAY         : {TOP_N_DAY}")
     print(f"CHART_DIR         : {CHART_DIR}")
     print(f"Scan symbols      : {[s for s in _LIVE_SYMBOLS if s not in ORB_EXCLUDED]}")
     assert ORB_RANGE_ATR_MIN  == 2.0,   f"ORB_RANGE_ATR_MIN unexpected: {ORB_RANGE_ATR_MIN}"
     assert ORB_EMA20_DIST_MIN == 1.95,  f"ORB_EMA20_DIST_MIN unexpected: {ORB_EMA20_DIST_MIN}"
     assert ORB_MAX_DIR_PER_DAY == 2,    f"ORB_MAX_DIR_PER_DAY unexpected: {ORB_MAX_DIR_PER_DAY}"
+    assert ORB_BREAK_DIST_MIN  == 0.05, f"ORB_BREAK_DIST_MIN unexpected: {ORB_BREAK_DIST_MIN}"
+
+    # F3 break distance: 0.022 blocked, 0.098 passes
+    assert 0.022 < ORB_BREAK_DIST_MIN, "F3: fakeout break (0.022) should be blocked"
+    assert 0.098 >= ORB_BREAK_DIST_MIN, "F3: valid break (0.098) should pass"
+    print("  F3 break distance (0.022 blocked, 0.098 passes): OK")
 
     # F2 filter: 3 same-direction signals on one day → keep top 2
     _f2_input = [
