@@ -10,7 +10,7 @@ Rules:
   ORB range >= 2.0 ATR  |  EMA20 dist >= 1.95 ATR (direction-adjusted)
   Excluded:  AAPL, AMD, AVGO, COST, GOOGL, SPY, TSLA, UBER
   Stop = 1.5 ATR  |  Target = 2.7 ATR (=1.8R)  |  Max hold = 40 bars
-  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Break dist >= 0.05 ATR (F3)  |  Breakout window: 10:00-11:30 ET
+  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Break dist >= 0.05 ATR (F3)  |  MSFT SHORT NEUTRAL blocked (F4)  |  Breakout window: 10:00-11:30 ET
 
 Source label: "ORB Daily"
 Priority:     B+C Sniper has priority -- if BC has active signal for a symbol,
@@ -242,7 +242,8 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
         if (b.close < ol and b.close < b.open
                 and not counter_short and (dt, "SHORT") not in emitted
                 and (e20 - b.close) / atr >= ORB_EMA20_DIST_MIN    # ORB Pro: EMA20 dist
-                and (ol - b.close)  / atr >= ORB_BREAK_DIST_MIN):  # F3: break dist
+                and (ol - b.close)  / atr >= ORB_BREAK_DIST_MIN    # F3: break dist
+                and not (sym == "MSFT" and bias == "NEUTRAL")):     # F4: MSFT SHORT NEUTRAL
             signals.append(dict(
                 symbol=sym, date=dt, entry_ts=ts, direction="SHORT",
                 entry_price=b.close,
@@ -298,6 +299,7 @@ class ORBDailyBridge:
             f"[ORB Bridge] started -- ADX>={ORB_ADX_MIN}  RVOL>={ORB_RVOL_MIN}x  "
             f"ORBrng>={ORB_RANGE_ATR_MIN}ATR  EMA20dist>={ORB_EMA20_DIST_MIN}ATR  "
             f"F2:max-{ORB_MAX_DIR_PER_DAY}/dir/day  F3:break>={ORB_BREAK_DIST_MIN}ATR  "
+            f"F4:MSFT-SHORT-NEUTRAL=blocked  "
             f"bias=not-counter  excl={sorted(ORB_EXCLUDED)}  "
             f"Top-{TOP_N_DAY}/day  {mode}"
         )
@@ -561,6 +563,12 @@ if __name__ == "__main__":
     assert 0.022 < ORB_BREAK_DIST_MIN, "F3: fakeout break (0.022) should be blocked"
     assert 0.098 >= ORB_BREAK_DIST_MIN, "F3: valid break (0.098) should pass"
     print("  F3 break distance (0.022 blocked, 0.098 passes): OK")
+
+    # F4: MSFT SHORT NEUTRAL blocked; MSFT SHORT BEAR and AMZN SHORT NEUTRAL pass
+    assert     ("MSFT" == "MSFT" and "NEUTRAL" == "NEUTRAL"), "F4 trigger check"
+    assert not ("MSFT" == "MSFT" and "BEAR"    == "NEUTRAL"), "F4: MSFT SHORT BEAR should pass"
+    assert not ("AMZN" == "MSFT" and "NEUTRAL" == "NEUTRAL"), "F4: AMZN SHORT NEUTRAL should pass"
+    print("  F4 MSFT SHORT NEUTRAL blocked (MSFT BEAR + AMZN NEUTRAL pass): OK")
 
     # F2 filter: 3 same-direction signals on one day → keep top 2
     _f2_input = [
