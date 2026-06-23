@@ -2818,7 +2818,10 @@ class PerformanceDashboard(QDialog):
         super().__init__(parent)
         self._parent_app = parent  # احفظ reference صريح
         self.setWindowTitle("📊 Performance Dashboard — تحليل الأداء الحقيقي + تكاليف")
-        self.setGeometry(80, 60, 1380, 820)
+        _scr_pd = QApplication.primaryScreen().availableGeometry()
+        self.resize(min(1380, _scr_pd.width()  - 80),
+                    min(820,  _scr_pd.height() - 80))
+        self.move(_scr_pd.x() + 40, _scr_pd.y() + 30)
         self.setStyleSheet("""
             QDialog,QWidget { background-color:#111a26; }
             QLabel  { color:#c8d6e5; font-size:12px; }
@@ -3852,7 +3855,9 @@ class PerformanceDashboard(QDialog):
 
         dlg = QDialog(self)
         dlg.setWindowTitle('🎓 نتائج التدريب العميق')
-        dlg.resize(500, 580)
+        _scr_dlg = QApplication.primaryScreen().availableGeometry()
+        dlg.resize(min(500, _scr_dlg.width()  - 80),
+                   min(580, _scr_dlg.height() - 80))
         dlg.setStyleSheet('background:#0a1628;color:#c8d6e5;')
         lay = QVBoxLayout(dlg)
         txt = QTextEdit()
@@ -6288,7 +6293,10 @@ class TradingApp(QMainWindow):
         if s['symbol_min_scores']:
             lines.append('\n📈 حد Score لكل رمز:')
             for sym,mn in sorted(s['symbol_min_scores'].items()): lines.append(f'  {sym}: min={mn}')
-        dlg=QDialog(self); dlg.setWindowTitle('🧠 تقرير التعلم الذاتي'); dlg.resize(520,600)
+        dlg=QDialog(self); dlg.setWindowTitle('🧠 تقرير التعلم الذاتي')
+        _scr_lr = QApplication.primaryScreen().availableGeometry()
+        dlg.resize(min(520, _scr_lr.width()  - 80),
+                   min(600, _scr_lr.height() - 80))
         dlg.setStyleSheet('background:#0a1628;color:#c8d6e5;')
         lay=QVBoxLayout(dlg); txt=QTextEdit(); txt.setReadOnly(True)
         clr = '#ff5e57' if exp_warn else '#05c46b'
@@ -6782,9 +6790,11 @@ class TradingApp(QMainWindow):
     # -----------------------------------------------
     def initUI(self):
         self.setWindowTitle("🤖 Auto Options Trader Pro")
-        self.setGeometry(0, 0, 1600, 900)
         self.setMinimumSize(1024, 700)
         self.showMaximized()
+        _scr           = QApplication.primaryScreen().availableGeometry()
+        _sw            = _scr.width()
+        self._ui_scale = max(0.78, min(1.0, _sw / 1920.0))
         self.setStyleSheet("""
             QMainWindow,QWidget { background-color:#111a26; }
             QLabel  { color:#c8d6e5; font-size:12px; }
@@ -6846,7 +6856,6 @@ class TradingApp(QMainWindow):
             QScrollArea { border:none; background:#111a26; }
         """)
 
-        _scr    = QApplication.primaryScreen().availableGeometry()
         _left   = self._build_left()
         _center = self._build_center()
         _right  = self._build_right()
@@ -6854,15 +6863,36 @@ class TradingApp(QMainWindow):
         c = QWidget()
         self.setCentralWidget(c)
 
-        if _scr.width() >= 1700:
-            # ── Desktop: three columns side by side ─────────────────
+        if _sw >= 1500:
+            # ── Wide screen (≥1500px): three resizable columns ──────
+            _left_scr = QScrollArea()
+            _left_scr.setWidget(_left)
+            _left_scr.setWidgetResizable(True)
+            _left_scr.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            _left_scr.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            _left_scr.setMinimumWidth(255)
+            _left_scr.setFrameShape(QFrame.NoFrame)
+            _left_scr.setStyleSheet(
+                "QScrollArea{border:none;background:#111a26;}"
+                "QScrollArea > QWidget{background:#111a26;}")
+            _spl = QSplitter(Qt.Horizontal)
+            _spl.addWidget(_left_scr)
+            _spl.addWidget(_center)
+            _spl.addWidget(_right)
+            _spl.setStretchFactor(0, 0)
+            _spl.setStretchFactor(1, 1)
+            _spl.setStretchFactor(2, 0)
+            _col = max(260, int(_sw * 0.16))
+            _spl.setSizes([_col, _sw - _col * 2 - 16, _col])
+            _spl.setHandleWidth(4)
+            _spl.setStyleSheet(
+                "QSplitter::handle{background:#1e2d3d;border-radius:2px;}")
             ml = QHBoxLayout(c)
-            ml.setSpacing(8); ml.setContentsMargins(8, 8, 8, 8)
-            ml.addWidget(_left,   stretch=0)
-            ml.addWidget(_center, stretch=1)
-            ml.addWidget(_right,  stretch=0)
+            ml.setContentsMargins(4, 4, 4, 4)
+            ml.setSpacing(0)
+            ml.addWidget(_spl)
         else:
-            # ── Laptop: tabbed layout ────────────────────────────────
+            # ── Narrow screen (<1500px): tabbed layout ───────────────
             _left_scroll = QScrollArea()
             _left_scroll.setWidget(_left)
             _left_scroll.setWidgetResizable(True)
@@ -6889,13 +6919,15 @@ class TradingApp(QMainWindow):
     def _lbl(self, text, color="#8395a7", size=10, bold=False):
         l = QLabel(text)
         fw = "bold" if bold else "normal"
-        l.setStyleSheet(f"color:{color}; font-size:{size}px; font-weight:{fw};")
+        _s = max(9, int(size * getattr(self, '_ui_scale', 1.0)))
+        l.setStyleSheet(f"color:{color}; font-size:{_s}px; font-weight:{fw};")
         return l
 
     def _ind_lbl(self, text, color):
         l = QLabel(text)
+        _s = max(9, int(11 * getattr(self, '_ui_scale', 1.0)))
         l.setStyleSheet(
-            f"color:{color}; font-size:11px; font-weight:bold;"
+            f"color:{color}; font-size:{_s}px; font-weight:bold;"
             f"background:#0a1628; padding:2px 6px; border-radius:3px;"
         )
         return l
@@ -7068,12 +7100,16 @@ class TradingApp(QMainWindow):
         )
         self.contracts_spin.setToolTip("عدد العقود لكل صفقة (افتراضي: 1)\n0DTE — عقد واحد يساوي 100 سهم")
         self.contracts_spin.valueChanged.connect(self._on_contracts_changed)
-        _dte_lbl = self._lbl("0–2 DTE | ⛔ حظر بعد 3PM", "#8395a7", 9)
         _cl.addWidget(self.contracts_spin)
-        _cl.addWidget(_dte_lbl)
         _cl.addStretch()
         g3l.addLayout(_cl)
-
+        _dte_row = QHBoxLayout(); _dte_row.setContentsMargins(0,0,0,0); _dte_row.setSpacing(4)
+        _dte_l = self._lbl("DTE: 0–2", "#8395a7", 9)
+        _dte_l.setLayoutDirection(Qt.LeftToRight)
+        _cut_l = self._lbl("⛔ حظر بعد 3PM", "#ff9f43", 9)
+        _cut_l.setLayoutDirection(Qt.RightToLeft)
+        _dte_row.addWidget(_dte_l); _dte_row.addStretch(); _dte_row.addWidget(_cut_l)
+        g3l.addLayout(_dte_row)
         g3l.addWidget(self._lbl("⚠ للحساب الحقيقي فقط", "#ff5e57", 9))
         g3.setLayout(g3l); v.addWidget(g3)
 
@@ -7081,7 +7117,7 @@ class TradingApp(QMainWindow):
         g4 = QGroupBox("🔍 رموز المسح")
         g4l = QVBoxLayout(); g4l.setSpacing(3)
         self.watchlist_widget = QListWidget()
-        self.watchlist_widget.setMinimumHeight(200)
+        self.watchlist_widget.setMinimumHeight(100)
         self.watchlist_widget.setStyleSheet(
             "QListWidget{background:#0a1628;color:#c8d6e5;font-size:11px;border:1px solid #1e2d3d;}"
             "QListWidget::item:selected{background:#0fbcf9;color:#0a1628;}")
@@ -9725,7 +9761,9 @@ class TradingApp(QMainWindow):
 
         win = QDialog(None)
         win.setWindowTitle(f"📊 {sym}")
-        win.resize(1400, 860)
+        _scr_cw = QApplication.primaryScreen().availableGeometry()
+        win.resize(min(1400, _scr_cw.width()  - 80),
+                   min(860,  _scr_cw.height() - 80))
         win.setStyleSheet("background:#0b0e11; color:#eaecef;")
         win.setWindowFlags(Qt.Window | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         self._chart_win = win
