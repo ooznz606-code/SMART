@@ -10,7 +10,7 @@ Rules:
   ORB range >= 2.0 ATR  |  EMA20 dist >= 1.95 ATR (direction-adjusted)
   Excluded:  AAPL, AMD, AVGO, COST, GOOGL, SPY, TSLA, UBER
   Stop = 1.5 ATR  |  Target = 2.7 ATR (=1.8R)  |  Max hold = 40 bars
-  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Break dist >= 0.05 ATR (F3)  |  MSFT SHORT NEUTRAL blocked (F4)  |  Breakout window: 10:00-11:30 ET
+  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Break dist >= 0.05 ATR (F3)  |  MSFT SHORT NEUTRAL blocked (F4)  |  Breakout window: 10:00-12:00 ET (noon)
 
 Source label: "ORB Daily"
 Priority:     B+C Sniper has priority -- if BC has active signal for a symbol,
@@ -215,7 +215,7 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
         elif dt in orb and not orb[dt][2] and sm >= SESS_ORB_DONE:
             orb[dt][2] = True  # lock ORB at 10:00 ET
 
-        # only scan during breakout window (10:00-11:30 ET)
+        # only scan during breakout window (10:00-12:00 ET noon)
         if sm < SESS_ORB_DONE or sm >= SESS_BRK_END:
             continue
         if dt not in orb or not orb[dt][2]:
@@ -688,7 +688,7 @@ class ORBDailyBridge:
         # Wall-clock window guard
         _now_sm = _sm(datetime.utcnow())
         if not (SESS_ORB_DONE <= _now_sm < SESS_BRK_END):
-            self._log(f"[ORB] {symbol}: outside 10:00-11:30 ET (sm={_now_sm}) -- skip")
+            self._log(f"[ORB] {symbol}: outside 10:00-12:00 ET noon (sm={_now_sm}) -- skip")
             return
 
         # Symbol exclusion guard (defense in depth)
