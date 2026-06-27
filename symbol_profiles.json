@@ -1,0 +1,146 @@
+{
+  "QQQ": {
+    "enabled": true,
+    "min_confidence": 80.3,
+    "max_confidence": 83.9,
+    "min_adx": 28,
+    "max_adx": 999,
+    "block_short": false,
+    "block_long": false
+  },
+  "LLY": {
+    "enabled": true,
+    "min_confidence": 74.0,
+    "max_confidence": 79.3,
+    "min_adx": 38,
+    "max_adx": 50,
+    "block_short": false,
+    "block_long": false
+  },
+  "AAPL": {
+    "enabled": true,
+    "min_confidence": 75.4,
+    "max_confidence": 79.3,
+    "min_adx": 30,
+    "max_adx": 59,
+    "block_short": false,
+    "block_long": false
+  },
+  "MSFT": {
+    "enabled": true,
+    "min_confidence": 71.0,
+    "max_confidence": 83.0,
+    "min_adx": 38,
+    "max_adx": 50,
+    "block_short": false,
+    "block_long": false
+  },
+  "NVDA": {
+    "enabled": true,
+    "min_confidence": 74.0,
+    "max_confidence": 81.8,
+    "min_adx": 34,
+    "max_adx": 55,
+    "block_short": false,
+    "block_long": false
+  },
+  "AMZN": {
+    "enabled": true,
+    "min_confidence": 76.4,
+    "max_confidence": 79.4,
+    "min_adx": 25,
+    "max_adx": 45,
+    "block_short": false,
+    "block_long": false
+  },
+  "GOOGL": {
+    "enabled": true,
+    "min_confidence": 72.0,
+    "max_confidence": 84.0,
+    "min_adx": 25,
+    "max_adx": 48,
+    "block_short": false,
+    "block_long": false
+  },
+  "NFLX": {
+    "enabled": true,
+    "min_confidence": 70.0,
+    "max_confidence": 73.5,
+    "min_adx": 20,
+    "max_adx": 60,
+    "block_short": false,
+    "block_long": false
+  },
+  "CRM": {
+    "enabled": true,
+    "min_confidence": 70.4,
+    "max_confidence": 73.9,
+    "min_adx": 20,
+    "max_adx": 999,
+    "block_short": false,
+    "block_long": false
+  },
+  "SHOP": {
+    "enabled": true,
+    "min_confidence": 70.0,
+    "max_confidence": 76.4,
+    "min_adx": 20,
+    "max_adx": 48,
+    "block_short": false,
+    "block_long": false
+  },
+  "ADBE": {
+    "enabled": true,
+    "min_confidence": 72.1,
+    "max_confidence": 75.3,
+    "min_adx": 20,
+    "max_adx": 51,
+    "block_short": false,
+    "block_long": false
+  },
+  "AVGO": {
+    "enabled": true,
+    "min_confidence": 75.4,
+    "max_confidence": 90.0,
+    "min_adx": 35,
+    "max_adx": 999,
+    "block_short": false,
+    "block_long": false
+  },
+  "COST": {
+    "enabled": true,
+    "min_confidence": 81.4,
+    "max_confidence": 82.4,
+    "min_adx": 28,
+    "max_adx": 60,
+    "block_short": false,
+    "block_long": false
+  },
+  "SPY": {
+    "enabled": true,
+    "min_confidence": 77.5,
+    "max_confidence": 84.0,
+    "min_adx": 39,
+    "max_adx": 999,
+    "block_short": false,
+    "block_long": false
+  },
+  "META": {
+    "enabled": false
+  },
+  "PG": {
+    "enabled": false
+  },
+  "TSLA": {
+    "enabled": false
+  },
+  "AMD": {
+    "enabled": false
+  },
+  "JPM": {
+    "enabled": false
+  },
+  "V": {
+    "enabled": false
+  }
+}

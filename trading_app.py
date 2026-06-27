@@ -2916,7 +2916,7 @@ class PerformanceDashboard(QDialog):
 
         top.addWidget(QLabel("الرمز:"))
         self.sym_combo = QComboBox()
-        for s in ['SPX', 'XSP', 'SPY', 'QQQ', 'IWM', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'META', 'AMD', 'INTC', 'QCOM', 'AVGO', 'TSM', 'MU', 'AMAT', 'LRCX', 'KLAC', 'SMCI', 'NFLX', 'CRM', 'ADBE', 'NOW', 'SNOW', 'PLTR', 'UBER', 'SHOP', 'MELI', 'CRWD', 'JPM', 'BAC', 'GS', 'MS', 'V', 'MA', 'AXP', 'BRK B', 'C', 'WFC', 'XOM', 'CVX', 'OXY', 'SLB', 'GLD', 'JNJ', 'UNH', 'LLY', 'PFE', 'ABBV', 'WMT', 'COST', 'HD', 'TGT', 'MCD', 'XLK', 'XLF', 'XLE', 'ARKK']:
+        for s in ['SPX', 'XSP', 'SPY', 'QQQ', 'IWM', 'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'META', 'AMD', 'INTC', 'QCOM', 'AVGO', 'TSM', 'MU', 'AMAT', 'LRCX', 'KLAC', 'SMCI', 'NFLX', 'CRM', 'ADBE', 'NOW', 'SNOW', 'PLTR', 'UBER', 'SHOP', 'MELI', 'CRWD', 'JPM', 'BAC', 'GS', 'MS', 'V', 'MA', 'AXP', 'BRK B', 'C', 'WFC', 'XOM', 'CVX', 'OXY', 'SLB', 'GLD', 'JNJ', 'UNH', 'PFE', 'ABBV', 'WMT', 'COST', 'HD', 'TGT', 'MCD', 'XLK', 'XLF', 'XLE', 'ARKK']:
             self.sym_combo.addItem(s)
         top.addWidget(self.sym_combo)
 
@@ -3639,7 +3639,7 @@ class PerformanceDashboard(QDialog):
         SYMBOLS = [
             'SPY','QQQ','IWM','AAPL','MSFT','NVDA','GOOGL','AMZN',
             'TSLA','META','AMD','AVGO','QCOM','NFLX','CRM','ADBE',
-            'JPM','BAC','GS','V','MA','XOM','CVX','UNH','LLY','JNJ',
+            'JPM','BAC','GS','V','MA','XOM','CVX','UNH','JNJ',
             'WMT','COST','HD','XLK','XLF','XLE'
         ]
 
@@ -6863,53 +6863,52 @@ class TradingApp(QMainWindow):
         c = QWidget()
         self.setCentralWidget(c)
 
-        if _sw >= 1500:
-            # ── Wide screen (≥1500px): three resizable columns ──────
-            _left_scr = QScrollArea()
-            _left_scr.setWidget(_left)
-            _left_scr.setWidgetResizable(True)
-            _left_scr.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            _left_scr.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            _left_scr.setMinimumWidth(255)
-            _left_scr.setFrameShape(QFrame.NoFrame)
-            _left_scr.setStyleSheet(
-                "QScrollArea{border:none;background:#111a26;}"
-                "QScrollArea > QWidget{background:#111a26;}")
-            _spl = QSplitter(Qt.Horizontal)
-            _spl.addWidget(_left_scr)
-            _spl.addWidget(_center)
-            _spl.addWidget(_right)
-            _spl.setStretchFactor(0, 0)
-            _spl.setStretchFactor(1, 1)
-            _spl.setStretchFactor(2, 0)
-            _col = max(260, int(_sw * 0.16))
-            _spl.setSizes([_col, _sw - _col * 2 - 16, _col])
-            _spl.setHandleWidth(4)
-            _spl.setStyleSheet(
-                "QSplitter::handle{background:#1e2d3d;border-radius:2px;}")
-            ml = QHBoxLayout(c)
-            ml.setContentsMargins(4, 4, 4, 4)
-            ml.setSpacing(0)
-            ml.addWidget(_spl)
+        # ── Single dashboard on all screens ──────────────────────────
+        # لا يوجد وضع Tabs للابتوب. نفس عرض الديسكتوب دائماً:
+        # يسار تحكم + وسط شارت + يمين تحليل، مع Scroll لليسار واليمين.
+        _left_scr = QScrollArea()
+        _left_scr.setWidget(_left)
+        _left_scr.setWidgetResizable(True)
+        _left_scr.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        _left_scr.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        _left_scr.setFrameShape(QFrame.NoFrame)
+        _left_scr.setStyleSheet(
+            "QScrollArea{border:none;background:#111a26;}"
+            "QScrollArea > QWidget{background:#111a26;}"
+        )
+
+        _spl = QSplitter(Qt.Horizontal)
+        _spl.addWidget(_left_scr)
+        _spl.addWidget(_center)
+        _spl.addWidget(_right)
+        _spl.setStretchFactor(0, 0)
+        _spl.setStretchFactor(1, 1)
+        _spl.setStretchFactor(2, 0)
+        _spl.setChildrenCollapsible(False)
+        _spl.setHandleWidth(4)
+        _spl.setStyleSheet(
+            "QSplitter::handle{background:#1e2d3d;border-radius:2px;}"
+        )
+
+        # مقاسات أعمدة متكيفة: 1366 يعطي تقريباً 240 / 876 / 250.
+        if _sw <= 1400:
+            _left_w, _right_w = 240, 250
+        elif _sw <= 1600:
+            _left_w, _right_w = 255, 265
         else:
-            # ── Narrow screen (<1500px): tabbed layout ───────────────
-            _left_scroll = QScrollArea()
-            _left_scroll.setWidget(_left)
-            _left_scroll.setWidgetResizable(True)
-            _left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            _left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            _left_scroll.setFrameShape(QFrame.NoFrame)
-            _left_scroll.setStyleSheet(
-                "QScrollArea{border:none;background:#111a26;}"
-                "QScrollArea > QWidget{background:#111a26;}")
-            tabs = QTabWidget()
-            tabs.addTab(_center,      "📊 الشارت")
-            tabs.addTab(_right,       "🧠 التحليل")
-            tabs.addTab(_left_scroll, "🎛 التحكم")
-            ml = QVBoxLayout(c)
-            ml.setContentsMargins(0, 0, 0, 0)
-            ml.setSpacing(0)
-            ml.addWidget(tabs)
+            _left_w = max(260, int(_sw * 0.15))
+            _right_w = max(270, int(_sw * 0.15))
+
+        _center_w = max(520, _sw - _left_w - _right_w - 24)
+        _left_scr.setMinimumWidth(220)
+        _right.setMinimumWidth(230)
+        _center.setMinimumWidth(500)
+        _spl.setSizes([_left_w, _center_w, _right_w])
+
+        ml = QHBoxLayout(c)
+        ml.setContentsMargins(4, 4, 4, 4)
+        ml.setSpacing(0)
+        ml.addWidget(_spl)
 
         sb = self.statusBar()
         sb.setStyleSheet("background:#0a1628; color:#0fbcf9; font-size:11px;")
@@ -8450,6 +8449,127 @@ class TradingApp(QMainWindow):
         else:
             self._on_bot_scan_signal(msg)
 
+
+
+    def _is_signal_log_line(self, text: str) -> bool:
+        """Signal rows only. Normal logs remain untouched."""
+        s = str(text or "")
+        return (
+            "[ORB Daily]" in s or
+            "[ORB LIVE]" in s or
+            "[PAPER / BC" in s or
+            "[BC LIVE" in s or
+            "Source: ORB" in s or
+            "Source: B+C" in s
+        )
+
+    def _signal_log_ttl_sec(self, text: str) -> int:
+        """UI-only lifetime for active signal rows."""
+        s = str(text or "")
+        if "[ORB" in s or "Source: ORB" in s:
+            return 300
+        if "[PAPER / BC" in s or "[BC LIVE" in s or "Source: B+C" in s:
+            return 180
+        return 240
+
+    def _signal_log_key(self, text: str) -> str:
+        """
+        Stable key used to update/remove the previous visible row instead of
+        leaving stale duplicate signals in the UI.
+        """
+        import re
+        s = str(text or "")
+        source = "ORB" if ("ORB" in s) else ("BC" if ("BC" in s or "B+C" in s) else "GEN")
+
+        direction = ""
+        for d in ("CALL", "PUT", "LONG", "SHORT"):
+            if re.search(rf"\b{d}\b", s):
+                direction = d
+                break
+
+        symbol = ""
+        m = re.search(r"\]\s*([A-Z]{1,6})\b", s)
+        if m:
+            symbol = m.group(1)
+        else:
+            m = re.search(r"\b([A-Z]{1,6})\s+(CALL|PUT|LONG|SHORT)\b", s)
+            if m:
+                symbol = m.group(1)
+
+        entry = ""
+        m = re.search(r"@\s*\$?([0-9]+(?:\.[0-9]+)?)", s)
+        if m:
+            try:
+                entry = f"{float(m.group(1)):.1f}"
+            except Exception:
+                entry = m.group(1)
+
+        return f"{source}|{symbol}|{direction}|{entry}"
+
+    def _prune_signal_log_items(self, force_legacy: bool = False):
+        """
+        Remove expired ORB/B+C signal rows from the visible signal panel.
+        This is UI state only; it does not change strategy/execution.
+        """
+        try:
+            now = time.time()
+            for i in range(self.signals_list.count() - 1, -1, -1):
+                item = self.signals_list.item(i)
+                if not item:
+                    continue
+
+                txt = item.text()
+                if not self._is_signal_log_line(txt):
+                    continue
+
+                ts = item.data(Qt.UserRole)
+                if ts is None:
+                    if force_legacy:
+                        self.signals_list.takeItem(i)
+                    continue
+
+                try:
+                    age = now - float(ts)
+                except Exception:
+                    age = 999999
+
+                if age >= self._signal_log_ttl_sec(txt):
+                    self.signals_list.takeItem(i)
+        except Exception:
+            pass
+
+    def _remove_same_signal_key(self, key: str):
+        """Remove older visible rows for the same signal key."""
+        if not key:
+            return
+        try:
+            for i in range(self.signals_list.count() - 1, -1, -1):
+                item = self.signals_list.item(i)
+                if not item:
+                    continue
+                old_key = item.data(Qt.UserRole + 1)
+                txt = item.text()
+                if old_key == key:
+                    self.signals_list.takeItem(i)
+                    continue
+                if old_key is None and self._is_signal_log_line(txt):
+                    if self._signal_log_key(txt) == key:
+                        self.signals_list.takeItem(i)
+        except Exception:
+            pass
+
+    def _ensure_signal_log_timer(self):
+        """Periodic cleanup for expired active-signal rows."""
+        if getattr(self, "_signal_log_ttl_timer_started", False):
+            return
+        try:
+            self._signal_log_ttl_timer_started = True
+            self._signal_log_ttl_timer = QTimer(self)
+            self._signal_log_ttl_timer.timeout.connect(lambda: self._prune_signal_log_items(False))
+            self._signal_log_ttl_timer.start(30000)
+        except Exception:
+            pass
+
     def _on_bot_scan_signal(self, msg):
         # [PROFILING] flood counter + slow detection
         _prof_bss_t0 = time.perf_counter()
@@ -8460,7 +8580,11 @@ class TradingApp(QMainWindow):
                 print(f'[PROF LOG FLOOD] _on_bot_scan_signal: {self._prof_log_cnt} calls/sec', flush=True)
             self._prof_log_cnt = 0; self._prof_log_sec = _sec
         self._prof_log_cnt += 1
-        if not msg: return
+        if not msg:
+            return
+
+        self._ensure_signal_log_timer()
+
         important = ['🎯','🏆','🚀','⚠','❌','CALL','PUT','📨','⏭','💰','⛔','🌍',
                      '📈','📉','📦','📋','📥','🔎','🧪','🥇','↔','⊘',
                      'سكور','تأكيد','تنفيذ','انتهى','أمر','PnL','إشارة','رُفض','رصيد',
@@ -8469,19 +8593,41 @@ class TradingApp(QMainWindow):
                      'FILLED','chains','strike','budget','سبريد','delta','qualify',
                      'Breakout','Pullback','Trend','SL=','TP1=','TP2=',
                      'ORB Daily','ORB LIVE','Source: B+C','Source: ORB']
-        if not any(k in msg for k in important): return
-        # تجنب تكرار نفس الرسالة
+
+        if not any(k in msg for k in important):
+            return
+
+        is_signal_line = self._is_signal_log_line(msg)
+
+        if is_signal_line and not getattr(self, "_signal_log_legacy_cleaned", False):
+            self._signal_log_legacy_cleaned = True
+            self._prune_signal_log_items(force_legacy=True)
+
+        self._prune_signal_log_items(force_legacy=False)
+
         if self.signals_list.count() > 0:
             if self.signals_list.item(0).text() == msg:
                 return
-        # [PROFILING] insertItem counter
+
+        sig_key = ""
+        if is_signal_line:
+            sig_key = self._signal_log_key(msg)
+            self._remove_same_signal_key(sig_key)
+
         _ins_sec = int(time.time())
         if _ins_sec != self._prof_insert_sec:
             if self._prof_insert_cnt > 20:
                 print(f'[PROF LOG FLOOD] signals_list.insertItem: {self._prof_insert_cnt} inserts/sec', flush=True)
             self._prof_insert_cnt = 0; self._prof_insert_sec = _ins_sec
         self._prof_insert_cnt += 1
+
         self.signals_list.insertItem(0, msg)
+        item = self.signals_list.item(0)
+
+        if is_signal_line:
+            item.setData(Qt.UserRole, time.time())
+            item.setData(Qt.UserRole + 1, sig_key)
+
         if 'CALL' in msg or '🎯' in msg or '🏆' in msg or '🚀' in msg:
             color = "#05c46b"
         elif 'PUT' in msg:
@@ -8492,13 +8638,17 @@ class TradingApp(QMainWindow):
             color = "#a29bfe"
         else:
             color = "#0fbcf9"
-        self.signals_list.item(0).setForeground(QBrush(QColor(color)))
+
+        item.setForeground(QBrush(QColor(color)))
+
         if self.signals_list.count() > 100:
             self.signals_list.takeItem(100)
+
         # [PROFILING] slow call detection
         _prof_bss_ms = (time.perf_counter() - _prof_bss_t0) * 1000
         if _prof_bss_ms > 30:
             print(f'[PROF SLOW] _on_bot_scan_signal: {_prof_bss_ms:.1f}ms  msg={msg[:50]!r}', flush=True)
+
 
     def _on_risk_alert(self, msg):
         self.signals_list.insertItem(0, msg)

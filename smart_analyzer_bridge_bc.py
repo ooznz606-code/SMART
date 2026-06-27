@@ -64,6 +64,7 @@ ENABLE_LIVE_BC = False
 SCAN_INTERVAL_SEC    = 60
 SIGNAL_LOOKBACK_DAYS = 2        # show signals from last N calendar days
 DATA_STALE_MIN       = 30       # warn if chart JSON older than this many minutes
+SIGNAL_TTL_SEC       = 900      # one 15m bar; do not display/route stale B+C signals
 
 # RVI thresholds -- derived from 8-month B+C+ATR backtest pool
 RVI_LO = 0.640
@@ -79,7 +80,7 @@ EXEC_ENTRY_OFFSET_MAX: int  = 4      # confirmation must arrive by bar 4 after b
 EXEC_BLOCKED_SYMS: set      = {"AAPL"}  # symbols blocked from live execution (temporary)
 
 CHART_DIR = _BC_CHART_DIR
-SYMBOLS   = list(_BC_SYMBOLS)
+SYMBOLS   = [s for s in _BC_SYMBOLS if str(s).upper() != "LLY"]  # LLY excluded from BC/Hybrid scanner
 
 SESSION_CUTOFF = 525  # session_min >= 525 => at or after 14:15 ET; block execution
 
@@ -245,6 +246,7 @@ class BCPaperBridge:
         self._running     = False
         self._thread: Optional[threading.Thread] = None
         self._seen:   Set[str] = set()              # signal keys logged this session
+        self._seen_ts: Dict[str, float] = {}         # key -> last log wall time; allows TTL pruning
         self._active_signals: Dict[str, Any] = {}   # symbol -> {id, ts}; cleaned by app
         self._cycle   = 0
 
@@ -286,8 +288,32 @@ class BCPaperBridge:
 
     # -- Scan cycle -----------------------------------------------------------
 
+    def _is_signal_fresh(self, sig: Dict) -> bool:
+        """Only display/route B+C signals that are still actionable."""
+        # Prefer session_min because signal birth time is 15m-bar based.
+        try:
+            sig_date = str(sig.get("date", ""))
+            now = datetime.utcnow()
+            if sig_date != now.strftime("%Y-%m-%d"):
+                return False
+            sm = int(sig.get("session_min", 9999))
+            now_sm = (now.hour - 9) * 60 + now.minute - 30
+            age_sec = (now_sm - sm) * 60
+            return 0 <= age_sec <= SIGNAL_TTL_SEC
+        except Exception:
+            return False
+
+    def _prune_seen(self) -> None:
+        """Prevent _seen from becoming a permanent block during long sessions."""
+        now = time.time()
+        stale = [k for k, ts in self._seen_ts.items() if now - ts > SIGNAL_TTL_SEC]
+        for k in stale:
+            self._seen_ts.pop(k, None)
+            self._seen.discard(k)
+
     def _scan(self) -> None:
         self._cycle += 1
+        self._prune_seen()
         all_sigs: List[Dict] = []
         cutoff = (datetime.now() - timedelta(days=SIGNAL_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
 
@@ -323,13 +349,16 @@ class BCPaperBridge:
             all_sigs.extend(sigs)
 
         selected = select_daily(all_sigs, TOP_N_DAILY)
-        recent   = [s for s in selected if s.get("date", "") >= cutoff]
+        # Only current actionable signals go to the UI/execution pipeline.
+        # Older signals remain available to research scripts but are not displayed as live.
+        recent   = [s for s in selected if s.get("date", "") >= cutoff and self._is_signal_fresh(s)]
 
         for sig in recent:
             key = (f"{sig['symbol']}|{sig['direction']}|"
                    f"{sig['date']}|{sig.get('birth_time', '')}")
             if key not in self._seen:
                 self._seen.add(key)
+                self._seen_ts[key] = time.time()
                 self._log_signal(sig)
 
         if self._cycle == 1 or self._cycle % 10 == 0:

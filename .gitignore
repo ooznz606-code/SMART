@@ -1,0 +1,37 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.spec
+*.iss
+
+# بيانات حساسة
+config.txt
+licenses.db
+*.db
+
+# ملفات محلية
+logs/
+data/
+chart_data/
+backtest_results/
+iv_cache.json
+risk_memory.json
+trade_history.json
+
+# بيئة
+.env
+*.env
+venv/
+.venv/
+
+# PyInstaller
+*.manifest
+version_info.txt
+build_log.txt
+SmartTrader.exe
