@@ -30,10 +30,20 @@ from typing import Dict, List, Optional, Set
 from analyzer_bc_core import load_symbol_candles, SYMBOLS as _LIVE_SYMBOLS, CHART_DIR as _CHART_DIR
 from analyzer_x2 import Candle  # type only
 
+# ── Brain Gate (Phase 12A) — safe optional import ────────────────────────────
+try:
+    import market_brain_gate as _brain_gate
+    _BRAIN_GATE_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _BRAIN_GATE_AVAILABLE = False
+
+_BRAIN_GATE_ALLOW = 'ALLOW_ORB'
+_BRAIN_GATE_BLOCK = 'BLOCK_ORB'
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-ORB_EXCLUDED:      frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL", "SPY", "TSLA", "UBER"})
+ORB_EXCLUDED:      frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL","SPY", "TSLA", "UBER"})
 ORB_ADX_MIN:       float     = 30.0
 ORB_RVOL_MIN:      float     = 1.5
 ORB_BODY_ATR:      float     = 0.25   # min candle body as fraction of ATR
@@ -44,6 +54,7 @@ ORB_BREAK_DIST_MIN:  float   = 0.05   # F3: min breakout distance beyond ORB lev
 
 SCAN_INTERVAL_SEC = 60
 DATA_STALE_MIN    = 30
+SIGNAL_TTL_SEC    = 300   # UI/execution freshness: do not show/route stale ORB signals
 TOP_N_DAY         = 3             # max live ORB signals per trading day
 
 SESS_OPEN     = 240   # 9:30 ET   — (ts.hour-9)*60 + ts.minute - 30
@@ -54,6 +65,11 @@ SESS_CUTOFF   = 525   # 14:15 ET  — hard session cutoff
 MIN_LB = 60           # minimum lookback bars for indicator warm-up
 
 CHART_DIR = _CHART_DIR
+
+# ORB-specific production scan list.  Do not use _LIVE_SYMBOLS directly for ORB
+# because _LIVE_SYMBOLS is shared with research / core symbol pools and may include
+# symbols intentionally removed from ORB production, such as LLY.
+_ORB_SYMBOLS = [s for s in _LIVE_SYMBOLS if str(s).upper() != "LLY"]
 
 
 # ── Indicator helpers ─────────────────────────────────────────────────────────
@@ -257,6 +273,184 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
     return signals
 
 
+# ── Rejection reason helper ──────────────────────────────────────────────────
+
+def _orb_rejection_reasons(sym: str, bars: List[Candle], bias_map: Dict, today: str) -> List[str]:
+    """
+    Returns a list of human-readable rejection reasons for the most recent
+    bar inside today's breakout window (10:00–11:30 ET).
+    Display-only — does not affect strategy logic.
+    """
+    n = len(bars)
+    if n < MIN_LB + 2:
+        return ["not enough bars"]
+
+    cl  = [b.close  for b in bars]
+    vol = [b.volume for b in bars]
+    atrs   = _atr(bars, 14)
+    adxs   = _adx(bars, 14)
+    rvs    = _rvol(vol, 20)
+    ema20s = _ema(cl, 20)
+
+    orb: Dict[str, list] = {}
+    last_reasons: List[str] = []
+
+    for i in range(MIN_LB, n):
+        b  = bars[i]
+        ts = b.timestamp
+        sm = _sm(ts)
+        dt = str(ts.date())
+
+        if dt != today:
+            if SESS_OPEN <= sm < SESS_ORB_DONE:
+                if dt not in orb:
+                    orb[dt] = [b.high, b.low, False]
+                else:
+                    orb[dt][0] = max(orb[dt][0], b.high)
+                    orb[dt][1] = min(orb[dt][1], b.low)
+            elif dt in orb and not orb[dt][2] and sm >= SESS_ORB_DONE:
+                orb[dt][2] = True
+            continue
+
+        if SESS_OPEN <= sm < SESS_ORB_DONE:
+            if dt not in orb:
+                orb[dt] = [b.high, b.low, False]
+            else:
+                orb[dt][0] = max(orb[dt][0], b.high)
+                orb[dt][1] = min(orb[dt][1], b.low)
+            continue
+        elif dt in orb and not orb[dt][2] and sm >= SESS_ORB_DONE:
+            orb[dt][2] = True
+
+        if sm < SESS_ORB_DONE or sm >= SESS_BRK_END:
+            continue
+        if dt not in orb or not orb[dt][2]:
+            continue
+
+        atr = atrs[i]
+        if atr <= 0:
+            continue
+
+        oh, ol, _ = orb[dt]
+        adx  = adxs[i]
+        rv   = rvs[i]
+        bias = bias_map.get(ts, "NEUTRAL")
+        body = abs(b.close - b.open)
+
+        reasons: List[str] = []
+        if adx  < ORB_ADX_MIN:
+            reasons.append(f"ADX weak ({adx:.1f}<{ORB_ADX_MIN})")
+        if rv   < ORB_RVOL_MIN:
+            reasons.append(f"RVOL low ({rv:.2f}<{ORB_RVOL_MIN})")
+        if body < ORB_BODY_ATR * atr:
+            reasons.append("body small")
+        if (oh - ol) / atr < ORB_RANGE_ATR_MIN:
+            reasons.append("ORB range small")
+        # Check breakout
+        broke_up   = b.close > oh and b.close > b.open
+        broke_down = b.close < ol and b.close < b.open
+        if not broke_up and not broke_down:
+            reasons.append("no breakout")
+        elif broke_up and bias == "BEAR":
+            reasons.append("counter-bias (LONG vs BEAR)")
+        elif broke_down and bias == "BULL":
+            reasons.append("counter-bias (SHORT vs BULL)")
+        if sym == "MSFT" and broke_down and bias == "NEUTRAL":
+            reasons.append("MSFT SHORT blocked (F4)")
+
+        last_reasons = reasons if reasons else ["passed filters (no emit yet)"]
+
+    return last_reasons if last_reasons else ["outside scan window"]
+
+
+# ── Brain Gate input derivation (Phase 12A) ──────────────────────────────────
+# Pure, read-only functions. No ORB strategy parameters referenced.
+
+def _bg_market_regime(c15_map: Dict, bias_map: Dict) -> Optional[str]:
+    """Current market regime from the latest SPY bar's bias entry."""
+    spy_bars = c15_map.get('SPY', [])
+    return bias_map.get(spy_bars[-1].timestamp) if spy_bars else None
+
+
+def _bg_spy_range_ratio(spy_bars: List[Candle], today: str) -> Optional[float]:
+    """Today's SPY daily range / rolling 14-day average daily range."""
+    if not spy_bars:
+        return None
+    day_lo: Dict[str, float] = {}
+    day_hi: Dict[str, float] = {}
+    for b in spy_bars:
+        d = str(b.timestamp.date())
+        day_lo[d] = min(day_lo.get(d, b.low),  b.low)
+        day_hi[d] = max(day_hi.get(d, b.high), b.high)
+    sorted_days = sorted(day_lo)
+    if today not in sorted_days:
+        return None
+    idx = sorted_days.index(today)
+    if idx == 0:
+        return None
+    daily_ranges = [day_hi[d] - day_lo[d] for d in sorted_days]
+    prior = daily_ranges[max(0, idx - 14):idx]
+    avg = sum(prior) / len(prior) if prior else 0.0
+    return daily_ranges[idx] / avg if avg > 0 else None
+
+
+def _bg_orb_range_atr(c15_map: Dict, today: str) -> Optional[float]:
+    """Average ORB range (ATR units) across non-excluded symbols for today's 9:30-10:00 window."""
+    ratios: List[float] = []
+    for sym, bars in c15_map.items():
+        if sym in ORB_EXCLUDED or not bars or len(bars) < 15:
+            continue
+        lo, hi, has_orb = float('inf'), float('-inf'), False
+        for b in bars:
+            if str(b.timestamp.date()) == today:
+                sm = _sm(b.timestamp)
+                if SESS_OPEN <= sm < SESS_ORB_DONE:
+                    lo = min(lo, b.low)
+                    hi = max(hi, b.high)
+                    has_orb = True
+        if not has_orb or hi <= lo:
+            continue
+        atr_vals = _atr(bars, 14)
+        atr = atr_vals[-1]
+        if atr > 0:
+            ratios.append((hi - lo) / atr)
+    return (sum(ratios) / len(ratios)) if ratios else None
+
+
+def _bg_breadth(c15_map: Dict) -> Optional[float]:
+    """% of non-excluded, non-index symbols whose latest close > EMA20."""
+    above, total = 0, 0
+    for sym, bars in c15_map.items():
+        if sym in ORB_EXCLUDED or sym in ('SPY', 'QQQ') or not bars or len(bars) < 20:
+            continue
+        ema20_vals = _ema([b.close for b in bars], 20)
+        if bars[-1].close > ema20_vals[-1]:
+            above += 1
+        total += 1
+    return (100.0 * above / total) if total > 0 else None
+
+
+def _check_brain_gate(
+    c15_map: Dict, bias_map: Dict, today: str, log_fn=None
+) -> tuple:
+    """
+    Derive brain gate inputs and evaluate. Returns (verdict, reason).
+    Safe: any exception or import failure returns ALLOW_ORB — never raises.
+    """
+    if not _BRAIN_GATE_AVAILABLE:
+        return _BRAIN_GATE_ALLOW, 'brain_gate_unavailable'
+    try:
+        regime  = _bg_market_regime(c15_map, bias_map)
+        spy_rr  = _bg_spy_range_ratio(c15_map.get('SPY', []), today)
+        orb_atr = _bg_orb_range_atr(c15_map, today)
+        breadth = _bg_breadth(c15_map)
+        return _brain_gate.evaluate(regime, spy_rr, orb_atr, breadth, date=today)
+    except Exception as exc:
+        if log_fn:
+            log_fn(f"[ORB Brain Gate] evaluation error — safe ALLOW: {exc}")
+        return _BRAIN_GATE_ALLOW, 'brain_gate_error_safe_allow'
+
+
 # ── ORB Daily Bridge ──────────────────────────────────────────────────────────
 
 class ORBDailyBridge:
@@ -336,7 +530,7 @@ class ORBDailyBridge:
 
         # Load 15m candles for all live symbols (SPY+QQQ needed for bias)
         c15_map: Dict = {}
-        for sym in _LIVE_SYMBOLS:
+        for sym in _ORB_SYMBOLS:
             json_path = os.path.join(CHART_DIR, f"{sym}_15m.json")
             if not os.path.exists(json_path):
                 continue
@@ -358,24 +552,46 @@ class ORBDailyBridge:
             bias_map = _build_bias(c15_map)
 
         # Collect all today's signals across scan symbols, sorted by score
-        all_today: List[Dict] = []
-        for sym in _LIVE_SYMBOLS:
+        all_today:    List[Dict]        = []
+        reject_map:   Dict[str, List[str]] = {}   # sym -> [reasons]
+        scanned_syms: List[str]         = []
+
+        for sym in _ORB_SYMBOLS:
             if sym in ORB_EXCLUDED:
                 continue
             bars = c15_map.get(sym)
             if not bars:
+                reject_map[sym] = ["no data / stale"]
                 continue
+            scanned_syms.append(sym)
             try:
                 sigs = scan_orb_live(sym, bars, bias_map)
             except Exception as exc:
                 self._log(f"[ORB] {sym}: scan error: {exc}")
+                reject_map[sym] = [f"scan error: {exc}"]
                 continue
-            for s in sigs:
-                if s["date"] == today:
-                    all_today.append(s)
+            today_sigs = [s for s in sigs if s["date"] == today]
+            if today_sigs:
+                all_today.extend(today_sigs)
+            else:
+                # Collect rejection reasons from latest bar in scan window
+                reasons = _orb_rejection_reasons(sym, bars, bias_map, today)
+                reject_map[sym] = reasons if reasons else ["outside scan window"]
 
         all_today.sort(key=lambda x: -x["score"])
         top_candidates = _f2_filter(all_today[:TOP_N_DAY])  # F2: max 2 per direction/day
+        # Do not re-display or route old intraday signals after their action window expires.
+        top_candidates = [s for s in top_candidates if self._is_signal_fresh(s)]
+
+        # ── Brain Gate (Phase 12A): day-level pre-filter before emission ────────
+        if top_candidates:
+            _gate_v, _gate_r = _check_brain_gate(c15_map, bias_map, today, self._log)
+            if _gate_v == _BRAIN_GATE_BLOCK:
+                self._log(
+                    f"[ORB Brain Gate] BLOCK_ORB ({_gate_r}) — "
+                    f"{len(top_candidates)} signal(s) suppressed"
+                )
+                top_candidates = []
 
         # Emit new signals up to daily cap
         emitted_today = self._day_count.get(today, 0)
@@ -387,15 +603,49 @@ class ORBDailyBridge:
                 self._day_count[today] = emitted_today
                 self._emit_signal(sig)
 
-        if self._cycle % 10 == 0:
-            mode = "LIVE" if self._enable_live else "DISPLAY"
+        # ── Status report every cycle ─────────────────────────────────────────
+        now_str = datetime.utcnow().strftime("%H:%M UTC")
+        mode    = "LIVE" if self._enable_live else "DISPLAY"
+
+        if top_candidates:
             self._log(
-                f"[ORB] Cycle #{self._cycle}  {today}: "
+                f"[ORB] {now_str}  Cycle #{self._cycle}  "
                 f"{len(top_candidates)} candidate(s)  "
-                f"emitted={self._day_count.get(today, 0)}/{TOP_N_DAY}  {mode}"
+                f"emitted={emitted_today}/{TOP_N_DAY}  {mode}"
             )
+        else:
+            # Summarise top rejection reasons across all symbols
+            reason_counts: Dict[str, int] = {}
+            for reasons in reject_map.values():
+                for r in reasons:
+                    reason_counts[r] = reason_counts.get(r, 0) + 1
+            top_reasons = sorted(reason_counts, key=lambda k: -reason_counts[k])[:3]
+            reasons_str = " / ".join(top_reasons) if top_reasons else "outside window"
+            self._log(
+                f"[ORB] {now_str}  quiet — scanned {len(scanned_syms)} symbols  "
+                f"0/{TOP_N_DAY} signals  |  {reasons_str}"
+            )
+            if self._cycle % 5 == 0 and reject_map:
+                detail = "  ".join(
+                    f"{s}:[{','.join(v[:2])}]"
+                    for s, v in reject_map.items() if v and v != ["outside scan window"]
+                )
+                if detail:
+                    self._log(f"[ORB detail] {detail}")
 
     # ── Signal emission ───────────────────────────────────────────────────────
+
+    def _is_signal_fresh(self, sig: Dict) -> bool:
+        """Only display/route ORB signals that are still actionable."""
+        ts = sig.get("entry_ts")
+        if not isinstance(ts, datetime):
+            return False
+        now = datetime.utcnow()
+        if str(ts.date()) != now.strftime("%Y-%m-%d"):
+            return False
+        # Use the same session-minute clock already used by the bridge.
+        age_sec = (_sm(now) - _sm(ts)) * 60
+        return 0 <= age_sec <= SIGNAL_TTL_SEC
 
     def _emit_signal(self, sig: Dict) -> None:
         direction_label = "CALL" if sig["direction"] == "LONG" else "PUT"
@@ -422,6 +672,7 @@ class ORBDailyBridge:
             f"SL=${stop_p:.2f}  TP1=${tp1_p:.2f}  |  "
             f"ADX={adx_v:.1f}  RVOL={rv_v:.1f}x  Bias={bias_s}  "
             f"Score={sig.get('score', 0):.1f}  |  "
+            f"Date={sig.get('date', '')} {sig.get('entry_ts').strftime('%H:%M') if isinstance(sig.get('entry_ts'), datetime) else ''}  |  "
             f"Source: ORB Daily  |  {tag}"
         )
 
@@ -553,7 +804,8 @@ if __name__ == "__main__":
     print(f"ORB_BREAK_DIST_MIN: {ORB_BREAK_DIST_MIN}")
     print(f"TOP_N_DAY         : {TOP_N_DAY}")
     print(f"CHART_DIR         : {CHART_DIR}")
-    print(f"Scan symbols      : {[s for s in _LIVE_SYMBOLS if s not in ORB_EXCLUDED]}")
+    print(f"Scan symbols      : {[s for s in _ORB_SYMBOLS if s not in ORB_EXCLUDED]}")
+    assert "LLY" not in _ORB_SYMBOLS, "LLY must be excluded from ORB scan symbols"
     assert ORB_RANGE_ATR_MIN  == 2.0,   f"ORB_RANGE_ATR_MIN unexpected: {ORB_RANGE_ATR_MIN}"
     assert ORB_EMA20_DIST_MIN == 1.95,  f"ORB_EMA20_DIST_MIN unexpected: {ORB_EMA20_DIST_MIN}"
     assert ORB_MAX_DIR_PER_DAY == 2,    f"ORB_MAX_DIR_PER_DAY unexpected: {ORB_MAX_DIR_PER_DAY}"

@@ -79,7 +79,7 @@ SWING_LOOKBACK = 60
 SIM_BARS       = 40
 
 SYMBOLS: List[str] = [
-    "AAPL", "AMD",  "TSLA", "AVGO", "COST", "LLY",  "PANW", "CRM",
+    "AAPL", "AMD",  "TSLA", "AVGO", "COST", "PANW", "CRM",
     "QQQ",  "SPY",  "MSFT", "META", "AMZN", "GOOGL", "NVDA", "NFLX",
     "UBER",
 ]
