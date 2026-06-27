@@ -1,0 +1,17 @@
+{
+  "QQQ":  {"enabled": true, "min_score": 78, "min_adx": 22, "max_daily_signals": 1},
+  "SPY":  {"enabled": true, "min_score": 78, "min_adx": 20, "max_daily_signals": 1},
+  "NVDA": {"enabled": true, "min_score": 79, "min_adx": 24, "max_daily_signals": 1},
+  "MSFT": {"enabled": true, "min_score": 78, "min_adx": 20, "max_daily_signals": 1},
+  "META": {"enabled": true, "min_score": 78, "min_adx": 20, "max_daily_signals": 1},
+  "AAPL": {"enabled": true, "min_score": 78, "min_adx": 20, "max_daily_signals": 1},
+  "AMD":  {"enabled": true, "min_score": 79, "min_adx": 24, "max_daily_signals": 1},
+  "AMZN": {"enabled": true, "min_score": 78, "min_adx": 20, "max_daily_signals": 1},
+  "AVGO": {"enabled": true, "min_score": 79, "min_adx": 24, "max_daily_signals": 1},
+  "TSLA": {"enabled": true, "min_score": 80, "min_adx": 26, "max_daily_signals": 1},
+  "COST": {"enabled": true, "min_score": 78, "min_adx": 20, "max_daily_signals": 1},
+  "NFLX": {"enabled": true, "min_score": 79, "min_adx": 22, "max_daily_signals": 1},
+  "GOOGL":{"enabled": true, "min_score": 78, "min_adx": 20, "max_daily_signals": 1},
+  "LLY":  {"enabled": true, "min_score": 80, "min_adx": 22, "max_daily_signals": 1},
+  "__DEFAULT__": {"enabled": false, "min_score": 999, "min_adx": 99, "max_daily_signals": 0}
+}

@@ -1,0 +1,9 @@
+symbol,is_start,is_end,is_days,signals,win_rate_pct,pf,total_r,max_dd_r,classification,top_rejection,top_rej_count,original_rationale
+AAPL,2025-09-17,2026-04-30,156,6,66.7,3.15,4.3,1.0,RECONSIDER,adx,579,high correlation with QQQ; adds index noise
+AMD,2025-09-17,2026-04-30,156,16,37.5,0.86,-1.39,3.79,REJECT,adx,476,erratic ORB behaviour; high false-breakout rate
+AVGO,2025-09-17,2026-04-30,156,12,33.3,0.9,-0.8,4.0,REJECT,adx,569,low liquidity relative to notional; gap risk
+COST,2025-09-17,2026-04-30,156,8,12.5,0.26,-5.2,7.0,REJECT,adx,555,slow mover; rarely meets RVOL threshold
+GOOGL,2025-09-17,2026-04-30,156,11,36.4,0.94,-0.44,3.2,REJECT,adx,550,high correlation with QQQ; redundant signal source
+SPY,2025-09-17,2026-04-30,156,2,50.0,1.8,0.8,1.0,WATCHLIST,adx,591,used for bias calculation; conflict of interest
+TSLA,2025-09-17,2026-04-30,156,15,46.7,1.58,4.6,2.2,WATCHLIST,adx,559,extreme volatility; ATR-based SL frequently breached pre-TP
+UBER,2025-09-17,2026-04-30,156,11,36.4,1.03,0.2,3.0,REJECT,adx,583,low ADX consistency; trend structure unreliable

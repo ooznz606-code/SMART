@@ -1,0 +1,82 @@
+{
+  "QQQ": {
+    "enabled": true,
+    "timeframe": "15m",
+    "min_conf": 40,
+    "min_adx": 22,
+    "max_adx": 55,
+    "max_daily_signals": 1,
+    "notes": "15m: 7W 3L 70.0% WR | 70.0% wd (7/10 days) [TP1:1.2R]"
+  },
+  "MSFT": {
+    "enabled": true,
+    "timeframe": "15m",
+    "min_conf": 40,
+    "min_adx": 25,
+    "max_adx": 45,
+    "max_daily_signals": 1,
+    "notes": "15m: 5W 0L 100.0% WR | 100.0% wd (5/5 days) [TP1:1.2R]"
+  },
+  "META": {
+    "enabled": true,
+    "timeframe": "15m",
+    "min_conf": 40,
+    "min_adx": 22,
+    "max_adx": 65,
+    "max_daily_signals": 1,
+    "notes": "15m: 6W 3L 66.7% WR | 71.4% wd (5/7 days) [TP1:1.2R]"
+  },
+  "AMZN": {
+    "enabled": true,
+    "timeframe": "15m",
+    "min_conf": 40,
+    "min_adx": 22,
+    "max_adx": 65,
+    "max_daily_signals": 1,
+    "notes": "15m: 9W 4L 69.2% WR | 66.7% wd (8/12 days) [TP1:1.2R]"
+  },
+  "GOOGL": {
+    "enabled": true,
+    "timeframe": "15m",
+    "min_conf": 40,
+    "min_adx": 25,
+    "max_adx": 55,
+    "max_daily_signals": 1,
+    "notes": "15m: 5W 3L 62.5% WR | 62.5% wd (5/8 days) [TP1:1.2R]"
+  },
+  "__DEFAULT__": {
+    "enabled": false,
+    "timeframe": "1H",
+    "min_conf": 999,
+    "min_adx": 99,
+    "max_adx": 999,
+    "max_daily_signals": 0
+  },
+  "SPY": {
+    "enabled": true,
+    "timeframe": "15m",
+    "min_conf": 40,
+    "min_adx": 22,
+    "max_adx": 65,
+    "max_daily_signals": 1,
+    "notes": "15m: 5W 4L 55.6% WR | 71.4% wd (5/7 days) [TP1:1.2R]"
+  },
+  "TLT": {
+    "enabled": true,
+    "timeframe": "1H",
+    "min_conf": 40,
+    "min_adx": 28,
+    "max_adx": 65,
+    "max_daily_signals": 1,
+    "notes": "1H: 2W 1L 66.7% WR | 100.0% wd (2/2 days) [TP1:1.2R]"
+  },
+  "IWM": {
+    "enabled": true,
+    "timeframe": "1H",
+    "min_conf": 40,
+    "min_adx": 28,
+    "max_adx": 45,
+    "max_daily_signals": 1,
+    "notes": "1H: 3W 1L 75.0% WR | 60.0% wd (3/5 days) [TP1:1.2R]"
+  }
+}

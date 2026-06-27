@@ -1,0 +1,11 @@
+symbol,in_bl,grade,recommendation,bl_n,bl_pf,bl_tr,bl_dd,bl_wr,best_config,best_n,best_pf,best_tr,best_dd,best_wr,delta_pf,delta_tr
+AMZN,YES,B,KEEP (optimized),14,1.54,3.79,2.00,42.9,H-01,15,1.80,5.59,2.00,46.7,0.26,1.80
+CRM,YES,A,KEEP (unchanged),12,4.00,10.80,1.00,66.7,H-01+H-04,14,3.70,11.83,1.37,64.3,-0.29,1.03
+LLY,YES,C,KEEP (optimized),6,1.80,2.40,3.00,50.0,H-01+H-02,9,3.60,7.80,3.00,66.7,1.80,5.40
+META,YES,C,KEEP (optimized),11,4.49,10.46,1.00,72.7,H-02,13,5.69,14.06,1.00,76.9,1.20,3.60
+MSFT,YES,C,KEEP (optimized),17,0.98,-0.20,5.20,35.3,H-01+H-04,18,1.44,4.40,5.20,44.4,0.46,4.60
+NFLX,YES,C,KEEP (optimized),8,2.44,4.33,2.00,62.5,H-01+H-04,12,3.18,8.73,3.00,66.7,0.74,4.40
+NVDA,YES,C,KEEP (optimized),14,1.80,5.60,3.00,50.0,H-02+H-04,17,2.57,11.00,2.00,58.8,0.77,5.40
+PANW,YES,D,REMOVE,9,0.51,-3.40,3.40,22.2,BL,9,0.51,-3.40,3.40,22.2,0.00,0.00
+QQQ,YES,C,KEEP (optimized),9,1.44,2.20,5.00,44.4,H-01+H-02,11,2.16,5.80,5.00,54.5,0.72,3.60
+AAPL,NO,C,KEEP (optimized),7,4.05,6.10,1.00,71.4,H-01+H-02+H-04,9,5.85,9.70,1.00,77.8,1.80,3.60

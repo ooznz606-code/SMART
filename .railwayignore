@@ -1,0 +1,8 @@
+dist/
+build/
+chart_data/
+__pycache__/
+*.pyc
+*.exe
+*.db
+.git/
