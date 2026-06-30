@@ -7432,8 +7432,18 @@ class TradingApp(QMainWindow):
                     self.ui_updater.show_status.emit(f"جاري الاتصال على port {port}...")
                     run_in_ib_thread(self.ib.connect, '127.0.0.1', port,
                                      clientId=self._client_id, readonly=False, timeout=10)
-                    connected_port = port
-                    break
+                    # تحقق أن الاتصال فعّال: managedAccounts يجب يرجع قيمة
+                    time.sleep(3.0)
+                    _test_accts = run_in_ib_thread(self.ib.managedAccounts)
+                    if _test_accts:
+                        connected_port = port
+                        print(f"[IBKR] port {port} ✅ حساب: {_test_accts[0]}")
+                        break
+                    else:
+                        print(f"[IBKR] port {port} — لا حساب، جرّب التالي...")
+                        try: run_in_ib_thread(self.ib.disconnect)
+                        except Exception: pass
+                        time.sleep(1.0)
                 except Exception as e:
                     last_err = e
                     try: run_in_ib_thread(self.ib.disconnect)
