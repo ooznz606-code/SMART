@@ -7510,11 +7510,20 @@ class TradingApp(QMainWindow):
                 except Exception:
                     pass
 
-                # جلب الحساب
+                # جلب الحساب — retry حتى 15 ثانية
                 try:
-                    accounts = run_in_ib_thread(self.ib.managedAccounts)
+                    accounts = []
+                    for _attempt in range(15):
+                        accounts = run_in_ib_thread(self.ib.managedAccounts)
+                        if accounts:
+                            break
+                        print(f"[IBKR] انتظار managedAccounts... ({_attempt+1}/15)")
+                        time.sleep(1.0)
                     if accounts:
                         self.account = accounts[0]
+                        print(f"[IBKR] حساب: {self.account}")
+                    else:
+                        print("[IBKR] ⚠️ managedAccounts فارغ بعد 15 ثانية")
                 except Exception as _ae:
                     print(f"[IBKR] خطأ جلب الحساب: {_ae}")
 
