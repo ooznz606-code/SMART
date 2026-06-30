@@ -6890,14 +6890,19 @@ class TradingApp(QMainWindow):
             "QSplitter::handle{background:#1e2d3d;border-radius:2px;}"
         )
 
-        # مقاسات أعمدة متكيفة: 1366 يعطي تقريباً 240 / 876 / 250.
-        if _sw <= 1400:
+        # مقاسات أعمدة متكيفة لكل الشاشات
+        if _sw <= 1366:       # 1366×768  laptop
+            _left_w, _right_w = 230, 240
+        elif _sw <= 1400:     # small desktop
             _left_w, _right_w = 240, 250
-        elif _sw <= 1600:
+        elif _sw <= 1600:     # 1600×900
             _left_w, _right_w = 255, 265
-        else:
+        elif _sw <= 1920:     # 1920×1080 Full HD
             _left_w = max(260, int(_sw * 0.15))
             _right_w = max(270, int(_sw * 0.15))
+        else:                 # 2K / 4K
+            _left_w = max(300, int(_sw * 0.14))
+            _right_w = max(300, int(_sw * 0.14))
 
         _center_w = max(520, _sw - _left_w - _right_w - 24)
         _left_scr.setMinimumWidth(220)
@@ -7466,9 +7471,10 @@ class TradingApp(QMainWindow):
 
             # ── إعداد ما بعد الاتصال ───────────────────────────────────
             try:
-                self.connected   = True
-                _is_paper        = connected_port in (7497, 4002)
-                self._paper_mode = _is_paper
+                self.connected        = True
+                self._connected_port  = connected_port
+                _is_paper             = connected_port in (7497, 4002)
+                self._paper_mode      = _is_paper
                 _mode_label      = "📄 PAPER" if _is_paper else "🔴 LIVE"
                 print(f"[IBKR] متصل على port {connected_port} — وضع: {_mode_label}")
                 self.ui_updater.show_status.emit(f"✅ متصل — {_mode_label} (port {connected_port})")
@@ -7604,16 +7610,20 @@ class TradingApp(QMainWindow):
 
     def _fetch_balance_on_connect(self):
         """
-        يجلب الرصيد من IBKR.
-        reqAccountUpdates يحتاج ib.sleep() (يُعالج IB events) وليس time.sleep().
-        نُنفّذ كل شيء داخل IB loop عبر coroutine.
+        يجلب الرصيد من IBKR — يدعم TWS (7496/7497) و IB Gateway (4001/4002).
+        IB Gateway أبطأ من TWS ويحتاج reqAccountSummary صريح كـ fallback.
         """
         import asyncio as _aio
 
-        acct = getattr(self, 'account', '') or ''
+        acct        = getattr(self, 'account', '') or ''
+        conn_port   = getattr(self, '_connected_port', 0)
+        is_gateway  = conn_port in (4001, 4002)
+        wait_init   = 3.0 if is_gateway else 2.0   # Gateway يحتاج وقت أطول للاستقرار
+        wait_after  = 5.0 if is_gateway else 3.0
 
         async def _bal_coro():
             import asyncio as _a2
+
             # ① تأكّد من الحساب
             _acct = acct
             try:
@@ -7622,23 +7632,24 @@ class TradingApp(QMainWindow):
                     if accts:
                         _acct = accts[0]
                         self.account = _acct
-                        print(f"[Balance] حساب: {_acct}")
+                print(f"[Balance] port={conn_port} acct={_acct or '?'} gateway={is_gateway}")
             except Exception as _e:
                 print(f"[Balance] managedAccounts: {_e}")
 
-            await _a2.sleep(2.0)   # استقرار الاتصال
+            await _a2.sleep(wait_init)
 
-            # ② subscribe — هذا يُعالَج داخل IB loop مباشرةً
-            try:
-                self.ib.reqAccountUpdates(True, _acct)
-                print(f"[Balance] reqAccountUpdates({_acct}) ✓")
-            except Exception as _e:
-                print(f"[Balance] reqAccountUpdates: {_e}")
+            # ② subscribe بحسابين: محدد وعام (Gateway قد يحتاج الفارغ)
+            for _sub_acct in ([_acct, ''] if is_gateway else [_acct]):
+                try:
+                    self.ib.reqAccountUpdates(True, _sub_acct)
+                    print(f"[Balance] reqAccountUpdates('{_sub_acct}') ✓")
+                    break
+                except Exception as _e:
+                    print(f"[Balance] reqAccountUpdates('{_sub_acct}'): {_e}")
 
-            # ③ انتظر وصول البيانات (3 ثوانٍ داخل IB loop)
-            await _a2.sleep(3.0)
+            await _a2.sleep(wait_after)
 
-            # ④ اقرأ القيم من الـcache
+            # ③ دالة استخراج الرصيد
             def _extract(vals):
                 nl = tc = af = None
                 for v in (vals or []):
@@ -7648,40 +7659,64 @@ class TradingApp(QMainWindow):
                     if cur and cur not in ('USD', 'BASE', ''):
                         continue
                     if tag == 'NetLiquidation' and val > 0: nl = val
-                    if tag == 'TotalCashValue' and val > 0: tc = val
-                    if tag == 'AvailableFunds' and val > 0: af = val
+                    if tag == 'TotalCashValue'  and val > 0: tc = val
+                    if tag == 'AvailableFunds'  and val > 0: af = val
                 return nl or tc or af
 
+            # ④ محاولة accountValues (مُعبأ بـ reqAccountUpdates)
             bal = _extract(self.ib.accountValues())
             if bal and bal > 0:
+                print(f"[Balance] accountValues ✓")
                 return bal
 
-            # ⑤ fallback: accountSummary (يُرسل طلب جديد)
+            # ⑤ IB Gateway: reqAccountSummary صريح (مختلف عن accountSummary())
+            if is_gateway:
+                try:
+                    print("[Balance] Gateway fallback: reqAccountSummary...")
+                    req_id = self.ib.client.getReqId()
+                    tags   = ("NetLiquidation,TotalCashValue,AvailableFunds"
+                              ",GrossPositionValue,BuyingPower")
+                    self.ib.client.reqAccountSummary(req_id, "All", tags)
+                    await _a2.sleep(4.0)
+                    bal = _extract(self.ib.accountSummary(_acct) if _acct
+                                   else self.ib.accountSummary())
+                    if bal and bal > 0:
+                        print(f"[Balance] reqAccountSummary ✓")
+                        return bal
+                except Exception as _e:
+                    print(f"[Balance] reqAccountSummary fallback: {_e}")
+
+            # ⑥ accountSummary من الـcache (TWS عادةً)
             try:
                 items = self.ib.accountSummary(_acct) if _acct \
                         else self.ib.accountSummary()
                 bal = _extract(items)
                 if bal and bal > 0:
+                    print(f"[Balance] accountSummary cache ✓")
                     return bal
             except Exception:
                 pass
 
-            # ⑥ انتظر أكثر وأعِد
+            # ⑦ انتظار أخير وإعادة المحاولة
             await _a2.sleep(5.0)
             bal = _extract(self.ib.accountValues())
+            if bal:
+                print(f"[Balance] retry accountValues ✓")
+            else:
+                print("[Balance] ⚠️ فارغ — تأكد: IB Gateway → Configure → API → Read-Only=OFF")
             return bal
 
         # شغّل الـcoroutine داخل IB event loop
         loop = get_ib_loop()
         future = _aio.run_coroutine_threadsafe(_bal_coro(), loop)
         try:
-            bal = future.result(timeout=30)
+            bal = future.result(timeout=40)
             if bal and bal > 0:
                 self.account_balance = bal
                 self.ui_updater.update_cash.emit(bal)
                 print(f"[Balance] ✅ ${bal:,.2f}")
             else:
-                print("[Balance] ⚠️ accountValues فارغ — تحقق من TWS API Settings")
+                print("[Balance] ⚠️ لم يُجلب الرصيد — تحقق من إعدادات IB Gateway API")
         except Exception as _e:
             print(f"[Balance] خطأ: {_e}")
 
