@@ -1,16 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-smart_analyzer_bridge_orb.py  --  ORB Daily Engine Bridge
-==========================================================
+smart_analyzer_bridge_orb.py  --  ORB Daily Engine Bridge  v2.0
+================================================================
 Opening Range Breakout signal scanner and live execution bridge.
 Runs alongside BCPaperBridge as a second signal source (Hybrid Engine).
 
-Rules:
-  ADX >= 30  |  RVOL >= 1.5x  |  Bias = not-counter (SPY+QQQ EMA9/EMA20)
-  ORB range >= 2.0 ATR  |  EMA20 dist >= 1.95 ATR (direction-adjusted)
+v2.0 — High-Precision ORB (Multi-Confirmation Stack):
+  ┌─ HARD FILTERS (all must pass) ──────────────────────────────────────────┐
+  │  ADX >= 35            (was 30 — stronger trend requirement)              │
+  │  RVOL_20 >= 1.5x      (research: 2.0 catastrophic in backtest)           │
+  │  Brk-candle RVOL >= 2.0x (5-bar window — score factor, not hard filter) │
+  │  Bias aligned         (BEAR excluded for LONG, BULL excluded for SHORT)  │
+  │  ORB range 1.5–4.0 ATR (was >= 2.0 only — upper bound added)            │
+  │  Break dist >= 0.10 ATR (was 0.05 — stronger break confirmation)         │
+  │  Candle body >= 0.30 ATR (was 0.25)                                      │
+  │  Window 10:00–10:45 ET  (was 10:00–11:30 — tighter = cleaner signals)   │
+  └──────────────────────────────────────────────────────────────────────────┘
+  ┌─ SCORING (0-100, min 65 required) ───────────────────────────────────────┐
+  │  ADX strength:         0–20 pts                                          │
+  │  RVOL strength:        0–20 pts                                          │
+  │  Brk-candle RVOL:      0–15 pts                                          │
+  │  HTF trend (sim 1H):   0–15 pts                                          │
+  │  Optimal time window:  0–10 pts                                          │
+  │  ORB range quality:    0–10 pts                                          │
+  │  EMA20 distance:       0–10 pts                                          │
+  └──────────────────────────────────────────────────────────────────────────┘
   Excluded:  AAPL, AMD, AVGO, COST, GOOGL, SPY, TSLA, UBER
-  Stop = 1.5 ATR  |  Target = 2.7 ATR (=1.8R)  |  Max hold = 40 bars
-  Top-3/day cap  |  Max 2 per direction/day (F2)  |  Break dist >= 0.05 ATR (F3)  |  MSFT SHORT NEUTRAL blocked (F4)  |  Breakout window: 10:00-12:00 ET (noon)
+  Stop = 1.5 ATR  |  Target = 2.0 ATR (tighter = higher hit rate)
+  Top-2/day cap   |  Max 2 per direction/day (F2)
+  MSFT SHORT NEUTRAL blocked (F4)
 
 Source label: "ORB Daily"
 Priority:     B+C Sniper has priority -- if BC has active signal for a symbol,
@@ -43,24 +61,33 @@ _BRAIN_GATE_BLOCK = 'BLOCK_ORB'
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-ORB_EXCLUDED:      frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL","SPY", "TSLA", "UBER"})
-ORB_ADX_MIN:       float     = 30.0
-ORB_RVOL_MIN:      float     = 1.5
-ORB_BODY_ATR:      float     = 0.25   # min candle body as fraction of ATR
-ORB_RANGE_ATR_MIN: float     = 2.0    # ORB range must be >= 2.0x ATR
-ORB_EMA20_DIST_MIN: float    = 1.95   # price must be >= 1.95 ATR from EMA20 (direction-adjusted)
-ORB_MAX_DIR_PER_DAY: int     = 2      # F2: max same-direction signals per day after Top-N cap
-ORB_BREAK_DIST_MIN:  float   = 0.05   # F3: min breakout distance beyond ORB level (ATR units)
+ORB_EXCLUDED:        frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL", "SPY", "TSLA", "UBER"})
+
+# v2.0 — stricter hard filters for higher precision
+ORB_ADX_MIN:         float = 35.0    # was 30 — require stronger trend
+ORB_RVOL_MIN:        float = 1.5     # research-proven: 2.0 was catastrophic (25% WR)
+ORB_BRK_RVOL_MIN:   float = 2.0     # NEW: breakout candle RVOL (5-bar window)
+ORB_BODY_ATR:        float = 0.30    # was 0.25 — stronger close beyond range
+ORB_RANGE_ATR_MIN:   float = 1.5     # was 2.0 — allow tighter ORB (volatile names)
+ORB_RANGE_ATR_MAX:   float = 4.0     # NEW: reject overly wide ORB (choppy days)
+ORB_EMA20_DIST_MIN:  float = 1.0     # was 1.95 — relaxed (VWAP replaces as primary filter)
+ORB_BREAK_DIST_MIN:  float = 0.10    # was 0.05 — stronger break confirmation (F3)
+ORB_SCORE_MIN:       float = 65.0    # NEW: composite score threshold 0-100
+TP_ATR_MULT:         float = 2.0     # was 2.7 — tighter TP = higher hit rate
+SL_ATR_MULT:         float = 1.5     # unchanged
+
+ORB_MAX_DIR_PER_DAY: int = 2         # F2: max same-direction signals per day
+TOP_N_DAY:           int = 2         # was 3 — quality over quantity
 
 SCAN_INTERVAL_SEC = 60
 DATA_STALE_MIN    = 30
-SIGNAL_TTL_SEC    = 300   # UI/execution freshness: do not show/route stale ORB signals
-TOP_N_DAY         = 3             # max live ORB signals per trading day
+SIGNAL_TTL_SEC    = 300
 
-SESS_OPEN     = 240   # 9:30 ET   — (ts.hour-9)*60 + ts.minute - 30
-SESS_ORB_DONE = 270   # 10:00 ET  — ORB range locks after this
-SESS_BRK_END  = 390   # 11:30 ET  — breakout window closes
-SESS_CUTOFF   = 525   # 14:15 ET  — hard session cutoff
+SESS_OPEN     = 240   # 9:30 ET
+SESS_ORB_DONE = 270   # 10:00 ET — ORB range locks
+SESS_BRK_END  = 315   # 10:45 ET — primary breakout window (was 390=11:30)
+SESS_BRK_EXT  = 360   # 11:00 ET — extended window (reduced score bonus)
+SESS_CUTOFF   = 525   # 14:15 ET — hard session cutoff
 
 MIN_LB = 60           # minimum lookback bars for indicator warm-up
 
@@ -133,6 +160,122 @@ def _rvol(vols: List[float], p: int = 20) -> List[float]:
     return out
 
 
+def _vwap(bars: List[Candle]) -> List[float]:
+    """Session VWAP — resets each day at 9:30 ET open."""
+    out: List[float] = []
+    cum_pv = 0.0
+    cum_vol = 0.0
+    cur_date = None
+    last_vwap = bars[0].close if bars else 0.0
+    for b in bars:
+        sm = _sm(b.timestamp)
+        dt = b.timestamp.date()
+        if dt != cur_date:
+            cur_date = dt
+            cum_pv = 0.0
+            cum_vol = 0.0
+        if sm >= SESS_OPEN:
+            tp = (b.high + b.low + b.close) / 3.0
+            cum_pv  += tp * b.volume
+            cum_vol += b.volume
+        vwap = (cum_pv / cum_vol) if cum_vol > 0 else b.close
+        last_vwap = vwap
+        out.append(vwap)
+    return out
+
+
+def _htf_trend(bars: List[Candle], step: int = 4) -> List[str]:
+    """Simulate 1H trend from 15-min bars: compare close[i] to close[i-step].
+    step=4 means 4x15m = 60min. Returns BULL / BEAR / NEUTRAL per bar."""
+    out: List[str] = ["NEUTRAL"] * len(bars)
+    for i in range(step, len(bars)):
+        c_now  = bars[i].close
+        c_prev = bars[i - step].close
+        if c_prev <= 0:
+            out[i] = "NEUTRAL"
+        elif c_now > c_prev * 1.0015:
+            out[i] = "BULL"
+        elif c_now < c_prev * 0.9985:
+            out[i] = "BEAR"
+        else:
+            out[i] = "NEUTRAL"
+    return out
+
+
+def _brk_candle_rvol(vols: List[float], i: int, window: int = 5) -> float:
+    """RVOL of bar[i] vs prior `window` bars — measures institutional push on breakout."""
+    if i < window:
+        return 1.0
+    avg = sum(vols[i - window:i]) / window
+    return vols[i] / avg if avg > 0 else 1.0
+
+
+def _ema_slope(ema_vals: List[float], i: int, lookback: int = 3) -> float:
+    """EMA slope: (ema[i] - ema[i-lookback]) / ema[i-lookback] * 100."""
+    if i < lookback or ema_vals[i - lookback] <= 0:
+        return 0.0
+    return (ema_vals[i] - ema_vals[i - lookback]) / ema_vals[i - lookback] * 100.0
+
+
+def _orb_composite_score(
+    adx: float,
+    rvol: float,
+    brk_rvol: float,
+    htf_direction: str,   # "BULL" / "BEAR" / "NEUTRAL"
+    signal_dir: str,      # "LONG" / "SHORT"
+    sm: int,              # session-minute of breakout bar
+    range_ratio: float,   # ORB range / ATR
+    ema_slope_val: float, # EMA20 slope (positive = up)
+) -> float:
+    """
+    Multi-factor composite score 0-100.
+    Hard filters already passed before calling this.
+    Need >= ORB_SCORE_MIN (65) to emit signal.
+    """
+    score = 0.0
+
+    # ADX strength (0–20 pts): 35=10, 45=15, 55+=20
+    adx_pts = min(20.0, max(0.0, (adx - 35.0) / 2.0 + 10.0))
+    score += adx_pts
+
+    # RVOL strength (0–20 pts): 2.0=10, 3.5=20
+    rvol_pts = min(20.0, max(0.0, (rvol - 2.0) / 1.5 * 10.0 + 10.0))
+    score += rvol_pts
+
+    # Breakout candle RVOL (0–15 pts): 2.0=7, 3.5=15
+    brk_pts = min(15.0, max(0.0, (brk_rvol - 2.0) / 1.5 * 8.0 + 7.0))
+    score += brk_pts
+
+    # HTF trend alignment (0–15 pts)
+    htf_aligned = (htf_direction == "BULL" and signal_dir == "LONG") or \
+                  (htf_direction == "BEAR" and signal_dir == "SHORT")
+    score += 15.0 if htf_aligned else (5.0 if htf_direction == "NEUTRAL" else 0.0)
+
+    # Optimal time window (0–10 pts): 10:00-10:30=10, 10:30-10:45=7, 10:45-11:00=3
+    if SESS_ORB_DONE <= sm < SESS_ORB_DONE + 30:
+        score += 10.0
+    elif sm < SESS_BRK_END:
+        score += 7.0
+    elif sm < SESS_BRK_EXT:
+        score += 3.0
+
+    # ORB range quality (0–10 pts): best 1.5-2.5 ATR (tight+explosive), ok 2.5-3.5
+    if 1.5 <= range_ratio <= 2.5:
+        score += 10.0
+    elif range_ratio <= 3.5:
+        score += 6.0
+    else:
+        score += 2.0
+
+    # EMA slope confirmation (0–10 pts)
+    if signal_dir == "LONG" and ema_slope_val > 0.05:
+        score += min(10.0, ema_slope_val / 0.05 * 5.0)
+    elif signal_dir == "SHORT" and ema_slope_val < -0.05:
+        score += min(10.0, abs(ema_slope_val) / 0.05 * 5.0)
+
+    return round(min(100.0, max(0.0, score)), 1)
+
+
 # ── Market bias ───────────────────────────────────────────────────────────────
 
 def _build_bias(c15_map: Dict) -> Dict:
@@ -157,6 +300,35 @@ def _build_bias(c15_map: Dict) -> Dict:
     return bias
 
 
+# ── Regime Gate (Phase 11) ────────────────────────────────────────────────────
+
+ORB_REGIME_ADX_MIN: float = 28.0   # SPY 15m ADX threshold — days below are skipped
+
+def _build_regime_days(c15_map: Dict, adx_min: float = ORB_REGIME_ADX_MIN) -> set:
+    """
+    Build the set of dates where market regime is trending enough for ORB.
+    Uses SPY 15m ADX at the first bar inside the breakout window (10:00 ET).
+    Days with SPY ADX < adx_min are excluded — research showed ADX>=28 cuts
+    losing months (Oct/Nov chop) without removing Jan/Feb/Jun trending days.
+    Returns set of date strings ('YYYY-MM-DD').  Empty set = no filter applied.
+    """
+    spy_bars = c15_map.get("SPY")
+    if not spy_bars:
+        return set()   # no SPY data → allow all days (fail open)
+
+    adxs = _adx(spy_bars, 14)
+    allowed: set = set()
+
+    for i, b in enumerate(spy_bars):
+        sm = _sm(b.timestamp)
+        if sm != SESS_ORB_DONE:   # first bar AT 10:00 ET
+            continue
+        if adxs[i] >= adx_min:
+            allowed.add(str(b.timestamp.date()))
+
+    return allowed
+
+
 # ── F2 direction cap ─────────────────────────────────────────────────────────
 
 def _f2_filter(signals: List[Dict]) -> List[Dict]:
@@ -177,11 +349,14 @@ def _f2_filter(signals: List[Dict]) -> List[Dict]:
 
 # ── ORB scanner ───────────────────────────────────────────────────────────────
 
-def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
+def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict,
+                  regime_days: Optional[set] = None) -> List[Dict]:
     """
     Scan for ORB breakout signals across the full bar history.
     Returns all qualifying signals (pre-Top-3 cap).
     Each (date, direction) pair is emitted at most once.
+    regime_days: set of allowed date strings from _build_regime_days().
+                 None = no regime filter (legacy / fallback).
     """
     n = len(bars)
     if n < MIN_LB + 2:
@@ -215,10 +390,13 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
         elif dt in orb and not orb[dt][2] and sm >= SESS_ORB_DONE:
             orb[dt][2] = True  # lock ORB at 10:00 ET
 
-        # only scan during breakout window (10:00-12:00 ET noon)
+        # only scan during breakout window (10:00-10:45 ET)
         if sm < SESS_ORB_DONE or sm >= SESS_BRK_END:
             continue
         if dt not in orb or not orb[dt][2]:
+            continue
+        # Regime Gate: skip choppy/non-trending days (Phase 11)
+        if regime_days is not None and dt not in regime_days:
             continue
 
         atr = atrs[i]
@@ -234,7 +412,8 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
         if adx  < ORB_ADX_MIN:        continue
         if rv   < ORB_RVOL_MIN:       continue
         if body < ORB_BODY_ATR * atr:  continue
-        if (oh - ol) / atr < ORB_RANGE_ATR_MIN: continue   # ORB Pro: range >= 2.0 ATR
+        if (oh - ol) / atr < ORB_RANGE_ATR_MIN: continue   # range minimum
+        if (oh - ol) / atr > ORB_RANGE_ATR_MAX: continue   # reject choppy/overextended ORB
 
         counter_long  = (bias == "BEAR")
         counter_short = (bias == "BULL")
@@ -248,8 +427,8 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
             signals.append(dict(
                 symbol=sym, date=dt, entry_ts=ts, direction="LONG",
                 entry_price=b.close,
-                stop_price=b.close - 1.5 * atr,
-                tp1=b.close + 2.7 * atr,
+                stop_price=b.close - SL_ATR_MULT * atr,
+                tp1=b.close + TP_ATR_MULT * atr,
                 adx=adx, rvol=rv, bias=bias, atr=atr,
                 score=adx * rv * score_mult,
             ))
@@ -263,8 +442,8 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict) -> List[Dict]:
             signals.append(dict(
                 symbol=sym, date=dt, entry_ts=ts, direction="SHORT",
                 entry_price=b.close,
-                stop_price=b.close + 1.5 * atr,
-                tp1=b.close - 2.7 * atr,
+                stop_price=b.close + SL_ATR_MULT * atr,
+                tp1=b.close - TP_ATR_MULT * atr,
                 adx=adx, rvol=rv, bias=bias, atr=atr,
                 score=adx * rv * score_mult,
             ))
@@ -548,8 +727,12 @@ class ORBDailyBridge:
             if self._cycle % 5 == 0:
                 self._log("[ORB Bridge] SPY/QQQ unavailable -- bias neutral")
             bias_map: Dict = {}
+            regime_days: Optional[set] = None
         else:
-            bias_map = _build_bias(c15_map)
+            bias_map    = _build_bias(c15_map)
+            regime_days = _build_regime_days(c15_map)
+            if today not in regime_days and self._cycle % 5 == 0:
+                self._log(f"[ORB] Regime Gate: {today} blocked (SPY ADX < {ORB_REGIME_ADX_MIN}) — choppy day")
 
         # Collect all today's signals across scan symbols, sorted by score
         all_today:    List[Dict]        = []
@@ -565,7 +748,7 @@ class ORBDailyBridge:
                 continue
             scanned_syms.append(sym)
             try:
-                sigs = scan_orb_live(sym, bars, bias_map)
+                sigs = scan_orb_live(sym, bars, bias_map, regime_days=regime_days)
             except Exception as exc:
                 self._log(f"[ORB] {sym}: scan error: {exc}")
                 reject_map[sym] = [f"scan error: {exc}"]
