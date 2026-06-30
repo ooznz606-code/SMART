@@ -7638,14 +7638,12 @@ class TradingApp(QMainWindow):
 
             await _a2.sleep(wait_init)
 
-            # ② subscribe بحسابين: محدد وعام (Gateway قد يحتاج الفارغ)
-            for _sub_acct in ([_acct, ''] if is_gateway else [_acct]):
-                try:
-                    self.ib.reqAccountUpdates(True, _sub_acct)
-                    print(f"[Balance] reqAccountUpdates('{_sub_acct}') ✓")
-                    break
-                except Exception as _e:
-                    print(f"[Balance] reqAccountUpdates('{_sub_acct}'): {_e}")
+            # ② subscribe: reqAccountUpdates(account='') — يأخذ account string فقط
+            try:
+                self.ib.reqAccountUpdates(_acct)
+                print(f"[Balance] reqAccountUpdates('{_acct}') ✓")
+            except Exception as _e:
+                print(f"[Balance] reqAccountUpdates: {_e}")
 
             await _a2.sleep(wait_after)
 
@@ -7664,7 +7662,7 @@ class TradingApp(QMainWindow):
                 return nl or tc or af
 
             # ④ محاولة accountValues (مُعبأ بـ reqAccountUpdates)
-            bal = _extract(self.ib.accountValues())
+            bal = _extract(self.ib.accountValues(_acct))
             if bal and bal > 0:
                 print(f"[Balance] accountValues ✓")
                 return bal

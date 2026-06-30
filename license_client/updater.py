@@ -16,7 +16,7 @@ from license_client.license_config import SERVER_URL, REQUEST_TIMEOUT
 
 log = logging.getLogger("updater")
 
-CURRENT_VERSION = "1.4.8"
+CURRENT_VERSION = "1.4.9"
 
 
 # ── Desktop path helper (يدعم OneDrive Desktop) ───────────────────────────────
@@ -283,3 +283,4 @@ def check_for_update(parent=None) -> bool:
         log.debug(f"Update check failed: {e}")
         _dialog_open = False
         return False
+
