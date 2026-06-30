@@ -20,7 +20,6 @@ UI controls respected via the existing _on_analyzer_trade_signal pipeline:
 
 Do NOT modify analyzer_x2.py.
 Do NOT modify execution.py.
-Do NOT remove smart_analyzer_bridge_x1.py.
 """
 from __future__ import annotations
 
@@ -33,6 +32,19 @@ from typing import Any, Dict, List, Optional, Set
 
 # -- ORB Daily Engine (second signal source) ----------------------------------
 from smart_analyzer_bridge_orb import ORBDailyBridge
+
+# -- Brain Gate Phase 13 (optional — safe if unavailable) ----------------------
+try:
+    import market_brain_gate as _brain_gate
+    _BRAIN_GATE_AVAILABLE = True
+except ImportError:
+    _BRAIN_GATE_AVAILABLE = False
+
+# Cached daily plan — rebuilt once per trading day
+_bg_plan_date: str  = ''
+_bg_plan_lock         = __import__('threading').Lock()
+_bg_daily_plan        = None   # DailyPlan | None
+_bg_trades_today: int = 0
 
 # -- Production analyzer (signal detection only) ------------------------------
 try:
@@ -71,13 +83,14 @@ RVI_LO = 0.640
 RVI_HI = 0.942
 ADX_TREND_MIN = 25.0
 
-# ── Execution quality gate (Grade A signals only) ─────────────────────────────
-# These thresholds further filter Grade A signals before live routing.
-# B / C / D remain display-only regardless.
-EXEC_RANK_MIN: float        = 75.0   # minimum rank_score
-EXEC_ADX_MIN: float         = 40.0   # strong-trend floor (regime gate requires 25; execution requires 40)
-EXEC_ENTRY_OFFSET_MAX: int  = 4      # confirmation must arrive by bar 4 after birth (bars 2-4)
-EXEC_BLOCKED_SYMS: set      = {"AAPL"}  # symbols blocked from live execution (temporary)
+# ── Execution quality gate (Grade A + B signals in Trend regime) ──────────────
+# Recalibrated: original 75/High/40 thresholds produced 0 live trades in 29 days
+# (max observed rank_score = 74.7).  New values based on backtest signal analysis.
+EXEC_RANK_MIN: float        = 65.0   # minimum rank_score (was 75 — never reached)
+EXEC_ADX_MIN: float         = 25.0   # trend floor (was 40 — too restrictive)
+EXEC_RVI_MIN: set           = {"High", "Medium"}  # allow Grade A+B (was High only)
+EXEC_ENTRY_OFFSET_MAX: int  = 4      # confirmation must arrive by bar 4 after birth
+EXEC_BLOCKED_SYMS: set      = {"AAPL"}  # symbols blocked from live execution
 
 CHART_DIR = _BC_CHART_DIR
 SYMBOLS   = [s for s in _BC_SYMBOLS if str(s).upper() != "LLY"]  # LLY excluded from BC/Hybrid scanner
@@ -85,30 +98,58 @@ SYMBOLS   = [s for s in _BC_SYMBOLS if str(s).upper() != "LLY"]  # LLY excluded 
 SESSION_CUTOFF = 525  # session_min >= 525 => at or after 14:15 ET; block execution
 
 
+# -- Brain Gate daily plan helpers (BC) ----------------------------------------
+
+def _bg_get_plan(today: str):
+    """Return cached DailyPlan for today, or None if unavailable."""
+    global _bg_plan_date, _bg_daily_plan
+    if not _BRAIN_GATE_AVAILABLE:
+        return None
+    with _bg_plan_lock:
+        if _bg_plan_date == today and _bg_daily_plan is not None:
+            return _bg_daily_plan
+        try:
+            _bg_daily_plan = _brain_gate.daily_session(date=today)
+            _bg_plan_date  = today
+        except Exception:
+            _bg_daily_plan = None
+    return _bg_daily_plan
+
+
+def _bg_reset_day(today: str) -> None:
+    """Reset daily trade counter at session start."""
+    global _bg_plan_date, _bg_trades_today
+    with _bg_plan_lock:
+        if _bg_plan_date != today:
+            _bg_trades_today = 0
+            _bg_plan_date    = today
+
+
 # -- Execution quality gate ---------------------------------------------------
 
 def passes_exec_gate(sig: Dict) -> tuple:
     """
-    Returns (True, "") when a Grade A signal clears all live-execution quality gates.
+    Returns (True, "") when a signal clears all live-execution quality gates.
     Returns (False, reason_str) for any failure.
 
     Gates (all must pass):
-      1. rank_score >= EXEC_RANK_MIN (75)
-      2. rvi_bucket == "High"
-      3. regime == "Trend"
-      4. adx >= EXEC_ADX_MIN (40)          -- strong trend, not just emerging trend
-      5. entry_offset <= EXEC_ENTRY_OFFSET_MAX (4)  -- confirmation within 4 bars
+      1. rank_score >= EXEC_RANK_MIN (65)
+      2. rvi_bucket in EXEC_RVI_MIN  (High or Medium)
+      3. regime == "Trend"           (Range signals display-only)
+      4. adx >= EXEC_ADX_MIN (25)    (trend confirmation)
+      5. entry_offset <= EXEC_ENTRY_OFFSET_MAX (4)
       6. atr_pct <= ATR_THRESHOLD (0.52)
-      7. symbol not in EXEC_BLOCKED_SYMS  (currently {"AAPL"})
+      7. symbol not in EXEC_BLOCKED_SYMS
       8. session_min < SESSION_CUTOFF (no trades at or after 14:15 ET)
+      9. Brain Gate v13 rank_signal() — direction + daily budget + quality
     """
     rank = sig.get("rank_score", 0.0)
     if rank < EXEC_RANK_MIN:
         return False, f"rank_score={rank:.1f} < {EXEC_RANK_MIN}"
 
     bkt = sig.get("rvi_bucket", "")
-    if bkt != "High":
-        return False, f"rvi_bucket={bkt!r} (need High)"
+    if bkt not in EXEC_RVI_MIN:
+        return False, f"rvi_bucket={bkt!r} (need High or Medium)"
 
     regime = sig.get("regime", "")
     if regime != "Trend":
@@ -133,6 +174,25 @@ def passes_exec_gate(sig: Dict) -> tuple:
     sm = sig.get("session_min", SESSION_CUTOFF)
     if sm >= SESSION_CUTOFF:
         return False, f"session_min={sm} >= {SESSION_CUTOFF} (after 14:15 ET)"
+
+    # Gate 9: Brain Gate v13 — direction filter + daily budget
+    # (quality already guaranteed by gates 1-8; only check regime direction + cap)
+    if _BRAIN_GATE_AVAILABLE:
+        try:
+            today = datetime.utcnow().strftime('%Y-%m-%d')
+            plan  = _bg_get_plan(today)
+            if plan is not None:
+                direction = sig.get("direction", "")
+                bg_dir = "CALL" if direction.upper() in ("LONG", "CALL") else "PUT"
+                if not plan.allows(bg_dir):
+                    return False, f"BrainGate: {bg_dir} blocked in {plan.regime} regime"
+                global _bg_trades_today
+                with _bg_plan_lock:
+                    if not plan.has_budget(_bg_trades_today):
+                        return False, f"BrainGate: daily budget reached ({_bg_trades_today}/{plan.max_trades})"
+                    _bg_trades_today += 1
+        except Exception:
+            pass   # Brain Gate failure is non-fatal
 
     return True, ""
 

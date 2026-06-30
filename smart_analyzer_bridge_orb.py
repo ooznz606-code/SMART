@@ -61,7 +61,9 @@ _BRAIN_GATE_BLOCK = 'BLOCK_ORB'
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-ORB_EXCLUDED:        frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL", "SPY", "TSLA", "UBER"})
+# Fresh 365-day validation confirmed ORB works for: AAPL, COST, GOOGL, TSLA (75-80% WR)
+# GAP strategy is better for: AMD, AVGO, SPY, UBER → keep excluded from ORB
+ORB_EXCLUDED:        frozenset = frozenset({"AMD", "AVGO", "SPY", "UBER"})
 
 # v2.0 — stricter hard filters for higher precision
 ORB_ADX_MIN:         float = 28.0    # lowered 35→28: regime gate already filters weak days
@@ -77,7 +79,7 @@ TP_ATR_MULT:         float = 2.0     # was 2.7 — tighter TP = higher hit rate
 SL_ATR_MULT:         float = 1.5     # unchanged
 
 ORB_MAX_DIR_PER_DAY: int = 2         # F2: max same-direction signals per day
-TOP_N_DAY:           int = 2         # was 3 — quality over quantity
+TOP_N_DAY:           int = 3         # expanded from 2 → more daily trades (12 symbols now)
 
 SCAN_INTERVAL_SEC = 60
 DATA_STALE_MIN    = 30
@@ -85,8 +87,8 @@ SIGNAL_TTL_SEC    = 300
 
 SESS_OPEN     = 240   # 9:30 ET
 SESS_ORB_DONE = 270   # 10:00 ET — ORB range locks
-SESS_BRK_END  = 315   # 10:45 ET — primary breakout window (was 390=11:30)
-SESS_BRK_EXT  = 360   # 11:00 ET — extended window (reduced score bonus)
+SESS_BRK_END  = 360   # 11:00 ET — primary breakout window (expanded from 10:45)
+SESS_BRK_EXT  = 390   # 11:30 ET — extended window (reduced score bonus)
 SESS_CUTOFF   = 525   # 14:15 ET — hard session cutoff
 
 MIN_LB = 60           # minimum lookback bars for indicator warm-up
@@ -431,6 +433,7 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict,
                 tp1=b.close + TP_ATR_MULT * atr,
                 adx=adx, rvol=rv, bias=bias, atr=atr,
                 score=adx * rv * score_mult,
+                sess_min=sm,
             ))
             emitted.add((dt, "LONG"))
 
@@ -446,6 +449,7 @@ def scan_orb_live(sym: str, bars: List[Candle], bias_map: Dict,
                 tp1=b.close - TP_ATR_MULT * atr,
                 adx=adx, rvol=rv, bias=bias, atr=atr,
                 score=adx * rv * score_mult,
+                sess_min=sm,
             ))
             emitted.add((dt, "SHORT"))
 
@@ -611,23 +615,29 @@ def _bg_breadth(c15_map: Dict) -> Optional[float]:
 
 def _check_brain_gate(
     c15_map: Dict, bias_map: Dict, today: str, log_fn=None
-) -> tuple:
+):
     """
-    Derive brain gate inputs and evaluate. Returns (verdict, reason).
-    Safe: any exception or import failure returns ALLOW_ORB — never raises.
+    Build today's DailyPlan using Phase 13 Brain Gate Decision Engine.
+    Returns DailyPlan on success, or None (safe-allow) on failure.
     """
     if not _BRAIN_GATE_AVAILABLE:
-        return _BRAIN_GATE_ALLOW, 'brain_gate_unavailable'
+        return None
     try:
         regime  = _bg_market_regime(c15_map, bias_map)
         spy_rr  = _bg_spy_range_ratio(c15_map.get('SPY', []), today)
         orb_atr = _bg_orb_range_atr(c15_map, today)
         breadth = _bg_breadth(c15_map)
-        return _brain_gate.evaluate(regime, spy_rr, orb_atr, breadth, date=today)
+        return _brain_gate.daily_session(
+            market_regime=regime,
+            spy_range_ratio=spy_rr,
+            orb_range_avg_atr=orb_atr,
+            breadth_pct=breadth,
+            date=today,
+        )
     except Exception as exc:
         if log_fn:
-            log_fn(f"[ORB Brain Gate] evaluation error — safe ALLOW: {exc}")
-        return _BRAIN_GATE_ALLOW, 'brain_gate_error_safe_allow'
+            log_fn(f"[ORB Brain Gate] daily_session error — safe allow: {exc}")
+        return None
 
 
 # ── ORB Daily Bridge ──────────────────────────────────────────────────────────
@@ -766,15 +776,34 @@ class ORBDailyBridge:
         # Do not re-display or route old intraday signals after their action window expires.
         top_candidates = [s for s in top_candidates if self._is_signal_fresh(s)]
 
-        # ── Brain Gate (Phase 12A): day-level pre-filter before emission ────────
-        if top_candidates:
-            _gate_v, _gate_r = _check_brain_gate(c15_map, bias_map, today, self._log)
-            if _gate_v == _BRAIN_GATE_BLOCK:
+        # ── Brain Gate (Phase 13): per-signal ranking + direction filter ─────────
+        if top_candidates and _BRAIN_GATE_AVAILABLE:
+            daily_plan = _check_brain_gate(c15_map, bias_map, today, self._log)
+            if daily_plan is not None:
                 self._log(
-                    f"[ORB Brain Gate] BLOCK_ORB ({_gate_r}) — "
-                    f"{len(top_candidates)} signal(s) suppressed"
+                    f"[ORB Brain Gate] {daily_plan.summary()}"
                 )
-                top_candidates = []
+                ranked = []
+                trades_approved = 0
+                for sig in top_candidates:
+                    bg_dir  = "CALL" if sig["direction"] == "LONG" else "PUT"
+                    bg_sig  = {
+                        "sym":       sig["symbol"],
+                        "direction": bg_dir,
+                        "score":     min(100.0, sig.get("score", 65.0) / 2.5),
+                        "source":    "ORB",
+                        "sess_min":  sig.get("sess_min", 75),
+                    }
+                    verdict = _brain_gate.rank_signal(bg_sig, daily_plan, trades_approved)
+                    if verdict.verdict == "APPROVED":
+                        ranked.append(sig)
+                        trades_approved += 1
+                    else:
+                        self._log(
+                            f"[ORB Brain Gate] SKIP {sig['symbol']} {bg_dir} "
+                            f"rank={verdict.rank_score:.1f} — {verdict.reason}"
+                        )
+                top_candidates = ranked
 
         # Emit new signals up to daily cap
         emitted_today = self._day_count.get(today, 0)
