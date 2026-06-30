@@ -64,8 +64,8 @@ _BRAIN_GATE_BLOCK = 'BLOCK_ORB'
 ORB_EXCLUDED:        frozenset = frozenset({"AAPL", "AMD", "AVGO", "COST", "GOOGL", "SPY", "TSLA", "UBER"})
 
 # v2.0 — stricter hard filters for higher precision
-ORB_ADX_MIN:         float = 35.0    # was 30 — require stronger trend
-ORB_RVOL_MIN:        float = 1.5     # research-proven: 2.0 was catastrophic (25% WR)
+ORB_ADX_MIN:         float = 28.0    # lowered 35→28: regime gate already filters weak days
+ORB_RVOL_MIN:        float = 1.2     # lowered 1.5→1.2: large caps have naturally high volume
 ORB_BRK_RVOL_MIN:   float = 2.0     # NEW: breakout candle RVOL (5-bar window)
 ORB_BODY_ATR:        float = 0.30    # was 0.25 — stronger close beyond range
 ORB_RANGE_ATR_MIN:   float = 1.5     # was 2.0 — allow tighter ORB (volatile names)

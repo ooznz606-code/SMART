@@ -1,7 +1,7 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 echo.
-echo ===  SmartTrader - Build EXE v1.4.8  ===
+echo ===  SmartTrader - Build EXE v1.5.0  ===
 echo.
 
 pip install requests --quiet
@@ -23,3 +23,4 @@ if exist "dist\SmartTrader.exe" (
 
 echo.
 pause
+
