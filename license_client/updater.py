@@ -16,7 +16,26 @@ from license_client.license_config import SERVER_URL, REQUEST_TIMEOUT
 
 log = logging.getLogger("updater")
 
-CURRENT_VERSION = "1.4.3"
+CURRENT_VERSION = "1.4.7"
+
+
+# ── Desktop path helper (يدعم OneDrive Desktop) ───────────────────────────────
+def _get_desktop_path(filename: str = "") -> str:
+    """يجد مسار سطح المكتب الحقيقي حتى لو كان OneDrive Desktop."""
+    try:
+        import ctypes, ctypes.wintypes
+        CSIDL_DESKTOPDIRECTORY = 0x0010
+        buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+        ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_DESKTOPDIRECTORY, None, 0, buf)
+        desktop = buf.value
+    except Exception:
+        # fallback: جرب OneDrive أولاً ثم المسار العادي
+        onedrive = os.environ.get("OneDrive", "")
+        if onedrive and os.path.isdir(os.path.join(onedrive, "Desktop")):
+            desktop = os.path.join(onedrive, "Desktop")
+        else:
+            desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+    return os.path.join(desktop, filename) if filename else desktop
 
 # ── ملف حفظ النسخة المتجاهلة ──────────────────────────────────────────────
 def _skip_file() -> str:
@@ -88,8 +107,8 @@ class DownloadWorker(QThread):
             r = requests.get(self.url, stream=True, timeout=120, headers=headers)
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
-            # احفظ على سطح المكتب مباشرة
-            desktop = os.path.join(os.path.expanduser("~"), "Desktop", "SmartTrader_new.exe")
+            # احفظ على سطح المكتب — يدعم OneDrive Desktop
+            desktop = _get_desktop_path("SmartTrader_new.exe")
             with open(desktop, "wb") as f:
                 downloaded = 0
                 for chunk in r.iter_content(chunk_size=65536):
