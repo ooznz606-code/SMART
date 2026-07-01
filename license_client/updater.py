@@ -16,7 +16,7 @@ from license_client.license_config import SERVER_URL, REQUEST_TIMEOUT
 
 log = logging.getLogger("updater")
 
-CURRENT_VERSION = "1.5.0"
+CURRENT_VERSION = "1.6.0"
 
 
 # ── Desktop path helper (يدعم OneDrive Desktop) ───────────────────────────────
@@ -108,7 +108,7 @@ class DownloadWorker(QThread):
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
             # احفظ على سطح المكتب — يدعم OneDrive Desktop
-            desktop = _get_desktop_path("SmartTrader_new.exe")
+            desktop = _get_desktop_path("SmartTrader.exe")
             with open(desktop, "wb") as f:
                 downloaded = 0
                 for chunk in r.iter_content(chunk_size=65536):
@@ -153,7 +153,7 @@ class UpdateDialog(QDialog):
         sub.setFont(QFont("Segoe UI", 11)); sub.setAlignment(Qt.AlignCenter)
         lay.addWidget(sub)
 
-        info = QLabel("سيتم حفظ الملف على سطح المكتب باسم SmartTrader_new.exe\nشغّله بعد اكتمال التحميل.")
+        info = QLabel("سيتم حفظ الملف على سطح المكتب باسم SmartTrader.exe\nشغّله بعد اكتمال التحميل.")
         info.setFont(QFont("Segoe UI", 9))
         info.setStyleSheet(f"color: {SUBTLE};"); info.setWordWrap(True)
         info.setAlignment(Qt.AlignCenter); lay.addWidget(info)
