@@ -302,33 +302,7 @@ def _build_bias(c15_map: Dict) -> Dict:
     return bias
 
 
-# ── Regime Gate (Phase 11) ────────────────────────────────────────────────────
-
-ORB_REGIME_ADX_MIN: float = 28.0   # SPY 15m ADX threshold — days below are skipped
-
-def _build_regime_days(c15_map: Dict, adx_min: float = ORB_REGIME_ADX_MIN) -> set:
-    """
-    Build the set of dates where market regime is trending enough for ORB.
-    Uses SPY 15m ADX at the first bar inside the breakout window (10:00 ET).
-    Days with SPY ADX < adx_min are excluded — research showed ADX>=28 cuts
-    losing months (Oct/Nov chop) without removing Jan/Feb/Jun trending days.
-    Returns set of date strings ('YYYY-MM-DD').  Empty set = no filter applied.
-    """
-    spy_bars = c15_map.get("SPY")
-    if not spy_bars:
-        return set()   # no SPY data → allow all days (fail open)
-
-    adxs = _adx(spy_bars, 14)
-    allowed: set = set()
-
-    for i, b in enumerate(spy_bars):
-        sm = _sm(b.timestamp)
-        if sm != SESS_ORB_DONE:   # first bar AT 10:00 ET
-            continue
-        if adxs[i] >= adx_min:
-            allowed.add(str(b.timestamp.date()))
-
-    return allowed
+# Regime Gate (Phase 11) removed — Brain Gate Phase 13 handles regime filtering
 
 
 # ── F2 direction cap ─────────────────────────────────────────────────────────
@@ -737,12 +711,9 @@ class ORBDailyBridge:
             if self._cycle % 5 == 0:
                 self._log("[ORB Bridge] SPY/QQQ unavailable -- bias neutral")
             bias_map: Dict = {}
-            regime_days: Optional[set] = None
         else:
-            bias_map    = _build_bias(c15_map)
-            regime_days = _build_regime_days(c15_map)
-            if today not in regime_days and self._cycle % 5 == 0:
-                self._log(f"[ORB] Regime Gate: {today} blocked (SPY ADX < {ORB_REGIME_ADX_MIN}) — choppy day")
+            bias_map = _build_bias(c15_map)
+        regime_days: Optional[set] = None  # Brain Gate Phase 13 handles regime filtering
 
         # Collect all today's signals across scan symbols, sorted by score
         all_today:    List[Dict]        = []

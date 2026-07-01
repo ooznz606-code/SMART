@@ -16,7 +16,7 @@ from license_client.license_config import SERVER_URL, REQUEST_TIMEOUT
 
 log = logging.getLogger("updater")
 
-CURRENT_VERSION = "1.6.0"
+CURRENT_VERSION = "1.6.1"
 
 
 # ── Desktop path helper (يدعم OneDrive Desktop) ───────────────────────────────
