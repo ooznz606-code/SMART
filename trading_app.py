@@ -110,12 +110,7 @@ if ANALYZER_MODE == "BC":
     else:
         print('[App] ⚠️  ORB DISPLAY ONLY — no live ORB orders')
 else:
-    try:
-        from smart_analyzer_bridge_x1 import MarketAnalyzerEngine
-        print('[App] ✅ X1 محمّل (smart_analyzer_bridge_x1 → analyzer_x1)')
-    except Exception as _x1_import_error:
-        from smart_analyzer_bridge import MarketAnalyzerEngine
-        print(f'[App] ⚠️ تعذر تحميل X1، تم الرجوع للمحلل القديم: {_x1_import_error}')
+    raise RuntimeError("ANALYZER_MODE must be 'BC' — X1 has been removed.")
 from execution import ExecutionEngine, ExecutionConfig
 
 # ── Config ────────────────────────────────────────────────────────
@@ -8396,6 +8391,11 @@ class TradingApp(QMainWindow):
         # ── مرجع موحّد للـ Trail Stop وإدارة الصفقات ────────────
         _analyzer._app = self
         self._market_analyzer = _analyzer   # يُستخدم في _on_new_trade و_on_close_trade
+
+        # Auto-start DataFeed if not already running
+        _df_thread = getattr(self, '_datafeed_thread', None)
+        if _df_thread is None or not _df_thread.is_alive():
+            self.toggle_datafeed()
 
         self._prof_last_action = '_do_toggle_bot:analyzer.start'
         _prof_as_t0 = time.perf_counter()

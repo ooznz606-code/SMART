@@ -1,7 +1,7 @@
 ﻿@echo off
 chcp 65001 >nul
 echo.
-echo ===  SmartTrader - Build EXE v1.6.1  ===
+echo ===  SmartTrader - Build EXE v1.6.2  ===
 echo.
 
 pip install requests --quiet
