@@ -82,7 +82,7 @@ ORB_MAX_DIR_PER_DAY: int = 2         # F2: max same-direction signals per day
 TOP_N_DAY:           int = 3         # expanded from 2 → more daily trades (12 symbols now)
 
 SCAN_INTERVAL_SEC = 60
-DATA_STALE_MIN    = 30
+DATA_STALE_MIN    = 480  # 8 hours — historical data still valid for analysis
 SIGNAL_TTL_SEC    = 300
 
 SESS_OPEN     = 240   # 9:30 ET

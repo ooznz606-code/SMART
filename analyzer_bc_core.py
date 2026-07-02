@@ -84,7 +84,12 @@ SYMBOLS: List[str] = [
     "UBER",
 ]
 
-CHART_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chart_data")
+import sys as _sys_core
+if getattr(_sys_core, "frozen", False):
+    # Running as PyInstaller EXE — tv_datafeed saves next to the EXE, not in _MEIPASS
+    CHART_DIR = os.path.join(os.path.dirname(_sys_core.executable), "chart_data")
+else:
+    CHART_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chart_data")
 
 
 # -- EMA (inlined from analyzer_bc_atr_daily / backtest_daily_selection) ------

@@ -75,7 +75,7 @@ ENABLE_LIVE_BC = False
 
 SCAN_INTERVAL_SEC    = 60
 SIGNAL_LOOKBACK_DAYS = 2        # show signals from last N calendar days
-DATA_STALE_MIN       = 30       # warn if chart JSON older than this many minutes
+DATA_STALE_MIN       = 480      # 8 hours — historical data still valid for analysis
 SIGNAL_TTL_SEC       = 900      # one 15m bar; do not display/route stale B+C signals
 
 # RVI thresholds -- derived from 8-month B+C+ATR backtest pool
