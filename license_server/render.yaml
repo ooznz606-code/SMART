@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: smarttrader-license
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn license_server.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ADMIN_TOKEN
+        value: Aa123123Aa
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DB_PATH
+        value: licenses.db
+    plan: free
