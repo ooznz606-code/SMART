@@ -11,4 +11,6 @@ services:
         generateValue: true
       - key: DB_PATH
         value: licenses.db
+      - key: EXE_DOWNLOAD_URL
+        value: https://github.com/ooznz606-code/SMART/releases/download/v1.7.0/SmartTrader.exe
     plan: free
