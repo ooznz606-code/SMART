@@ -843,24 +843,33 @@ async def upload_exe(request: Request, file: UploadFile = File(...)):
     require_admin(request)
     data = await file.read()
     size_mb = len(data) / (1024 * 1024)
-    with get_db() as db:
-        db.execute(
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(
             "INSERT OR REPLACE INTO app_files(name, data, size, uploaded_at) VALUES(?,?,?,datetime('now'))",
-            ("SmartTrader.exe", data, len(data))
+            ("SmartTrader.exe", _sqlite3.Binary(data), len(data))
         )
+        conn.commit()
+    finally:
+        conn.close()
     return {"success": True, "size_mb": round(size_mb, 1)}
 
 @app.get("/download/app")
 async def download_app():
     from fastapi.responses import StreamingResponse
-    import io
-    with get_db() as db:
-        row = db.execute("SELECT data FROM app_files WHERE name='SmartTrader.exe'").fetchone()
-    if row:
+    import io, sqlite3 as _sqlite3
+    conn = _sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute("SELECT data FROM app_files WHERE name='SmartTrader.exe'").fetchone()
+    finally:
+        conn.close()
+    if row and row[0]:
         return StreamingResponse(
-            io.BytesIO(row["data"]),
+            io.BytesIO(bytes(row[0])),
             media_type="application/octet-stream",
-            headers={"Content-Disposition": "attachment; filename=SmartTrader.exe"}
+            headers={"Content-Disposition": "attachment; filename=SmartTrader.exe",
+                     "Content-Length": str(len(row[0]))}
         )
     raise HTTPException(status_code=404, detail="File not found")
 
