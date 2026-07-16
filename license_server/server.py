@@ -857,11 +857,10 @@ async def download_app():
             filename="SmartTrader.exe",
             headers={"Content-Disposition": "attachment; filename=SmartTrader.exe"}
         )
-    ext_url = os.environ.get("EXE_DOWNLOAD_URL", "").strip()
-    if ext_url:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=ext_url, status_code=302)
-    raise HTTPException(status_code=404, detail="File not found")
+    ext_url = (os.environ.get("EXE_DOWNLOAD_URL", "").strip()
+               or "https://github.com/ooznz606-code/SMART/releases/download/v1.7.0/SmartTrader.exe")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=ext_url, status_code=302)
 
 # ── تشغيل مباشر ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
