@@ -841,40 +841,27 @@ _EXE_PATH = os.path.join(_EXE_DIR, "SmartTrader.exe")
 @app.post("/admin/upload-exe")
 async def upload_exe(request: Request, file: UploadFile = File(...)):
     require_admin(request)
+    os.makedirs(os.path.dirname(_EXE_PATH), exist_ok=True)
     data = await file.read()
-    size_mb = len(data) / (1024 * 1024)
-    import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(DB_PATH)
-    try:
-        conn.execute(
-            "INSERT OR REPLACE INTO app_files(name, data, size, uploaded_at) VALUES(?,?,?,datetime('now'))",
-            ("SmartTrader.exe", _sqlite3.Binary(data), len(data))
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    with open(_EXE_PATH, "wb") as f:
+        f.write(data)
+    size_mb = os.path.getsize(_EXE_PATH) / (1024 * 1024)
     return {"success": True, "size_mb": round(size_mb, 1)}
 
 @app.get("/download/app")
 async def download_app():
-    import sqlite3 as _sqlite3, tempfile, asyncio
-    conn = _sqlite3.connect(DB_PATH)
-    try:
-        row = conn.execute("SELECT data FROM app_files WHERE name='SmartTrader.exe'").fetchone()
-    finally:
-        conn.close()
-    if not row or not row[0]:
-        raise HTTPException(status_code=404, detail="File not found")
-    data = bytes(row[0])
-    tmp = os.path.join(tempfile.gettempdir(), "SmartTrader_serve.exe")
-    with open(tmp, "wb") as f:
-        f.write(data)
-    return FileResponse(
-        tmp,
-        media_type="application/octet-stream",
-        filename="SmartTrader.exe",
-        headers={"Content-Disposition": "attachment; filename=SmartTrader.exe"}
-    )
+    if os.path.exists(_EXE_PATH):
+        return FileResponse(
+            _EXE_PATH,
+            media_type="application/octet-stream",
+            filename="SmartTrader.exe",
+            headers={"Content-Disposition": "attachment; filename=SmartTrader.exe"}
+        )
+    ext_url = os.environ.get("EXE_DOWNLOAD_URL", "").strip()
+    if ext_url:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=ext_url, status_code=302)
+    raise HTTPException(status_code=404, detail="File not found")
 
 # ── تشغيل مباشر ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
