@@ -857,21 +857,24 @@ async def upload_exe(request: Request, file: UploadFile = File(...)):
 
 @app.get("/download/app")
 async def download_app():
-    from fastapi.responses import StreamingResponse
-    import io, sqlite3 as _sqlite3
+    import sqlite3 as _sqlite3, tempfile, asyncio
     conn = _sqlite3.connect(DB_PATH)
     try:
         row = conn.execute("SELECT data FROM app_files WHERE name='SmartTrader.exe'").fetchone()
     finally:
         conn.close()
-    if row and row[0]:
-        return StreamingResponse(
-            io.BytesIO(bytes(row[0])),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": "attachment; filename=SmartTrader.exe",
-                     "Content-Length": str(len(row[0]))}
-        )
-    raise HTTPException(status_code=404, detail="File not found")
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="File not found")
+    data = bytes(row[0])
+    tmp = os.path.join(tempfile.gettempdir(), "SmartTrader_serve.exe")
+    with open(tmp, "wb") as f:
+        f.write(data)
+    return FileResponse(
+        tmp,
+        media_type="application/octet-stream",
+        filename="SmartTrader.exe",
+        headers={"Content-Disposition": "attachment; filename=SmartTrader.exe"}
+    )
 
 # ── تشغيل مباشر ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
