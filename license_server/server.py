@@ -119,6 +119,12 @@ def init_db():
             result       TEXT    DEFAULT '',
             timestamp    TEXT    DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS app_files (
+            name  TEXT PRIMARY KEY,
+            data  BLOB NOT NULL,
+            size  INTEGER DEFAULT 0,
+            uploaded_at TEXT DEFAULT (datetime('now'))
+        );
         """)
         # migration: أضف device_token إذا كانت قاعدة البيانات قديمة
         cols = [r[1] for r in db.execute("PRAGMA table_info(devices)").fetchall()]
@@ -835,26 +841,27 @@ _EXE_PATH = os.path.join(_EXE_DIR, "SmartTrader.exe")
 @app.post("/admin/upload-exe")
 async def upload_exe(request: Request, file: UploadFile = File(...)):
     require_admin(request)
-    with open(_EXE_PATH, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    size_mb = os.path.getsize(_EXE_PATH) / (1024 * 1024)
+    data = await file.read()
+    size_mb = len(data) / (1024 * 1024)
+    with get_db() as db:
+        db.execute(
+            "INSERT OR REPLACE INTO app_files(name, data, size, uploaded_at) VALUES(?,?,?,datetime('now'))",
+            ("SmartTrader.exe", data, len(data))
+        )
     return {"success": True, "size_mb": round(size_mb, 1)}
 
 @app.get("/download/app")
 async def download_app():
-    # 1) إذا الملف موجود محلياً — أرسله مباشرة
-    if os.path.exists(_EXE_PATH):
-        return FileResponse(
-            _EXE_PATH,
+    from fastapi.responses import StreamingResponse
+    import io
+    with get_db() as db:
+        row = db.execute("SELECT data FROM app_files WHERE name='SmartTrader.exe'").fetchone()
+    if row:
+        return StreamingResponse(
+            io.BytesIO(row["data"]),
             media_type="application/octet-stream",
-            filename="SmartTrader.exe",
             headers={"Content-Disposition": "attachment; filename=SmartTrader.exe"}
         )
-    # 2) إذا يوجد رابط خارجي — redirect إليه
-    ext_url = os.environ.get("EXE_DOWNLOAD_URL", "").strip() or DOWNLOAD_URL.strip()
-    if ext_url:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=ext_url, status_code=302)
     raise HTTPException(status_code=404, detail="File not found")
 
 # ── تشغيل مباشر ──────────────────────────────────────────────────────────────
